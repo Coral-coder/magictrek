@@ -31,6 +31,39 @@ class GameObject {
   bool assimilated = false;
   PlayerID? attacking;
   ObjectID? blocking;
+  /// Arrived on the battlefield by being cast ("if you cast it").
+  bool wasCast = false;
+  /// Nyota Uhura: the number chosen as it entered.
+  int? chosenNumber;
+  /// Entered as a copy of this card (Dominion Saboteur); the printed card is `cardID`.
+  String? copiedCardID;
+  /// A copy "except it isn't legendary".
+  bool nonLegendary = false;
+  /// May be played from exile by `playableBy` until the end of turn `playableUntilTurn`
+  /// (Reckless Impulse, Silicate Surveyor...), for `extraCost` more (Zero).
+  PlayerID? playableBy;
+  int playableUntilTurn = 0;
+  int extraCost = 0;
+  /// Effects lasting until the start of a player's next turn (V'Ger's -1/-0).
+  List<LastingEffect> lasting = [];
+  /// Control returns to this player at end of turn (gain control until end of turn).
+  PlayerID? controlRevertsTo;
+  /// Phased out: treated as though it doesn't exist.
+  bool phasedOut = false;
+  /// "If that creature would die this turn, exile it instead."
+  bool exileIfDiesThisTurn = false;
+  /// Q: an exiled card that can be copied by exiling a card from hand.
+  bool qCopyable = false;
+  /// Charge counters were put on it this turn (Enterprise-D's "first time each turn").
+  bool chargedThisTurn = false;
+  /// Seven of Nine: base power and toughness set by an ability.
+  int? basePowerOverride, baseToughnessOverride;
+  /// Kobayashi Maru: modes already chosen.
+  Set<int> usedModes = {};
+  /// Exiled "until ~ leaves the battlefield".
+  List<ObjectID> exiledUntilLeaves = [];
+  /// Temporary creature types ("becomes a Doctor").
+  List<String> addedTypes = [];
 
   bool get isToken => token != null;
   int get plusOneCounters => counters[CounterKind.plusOne] ?? 0;
@@ -38,7 +71,15 @@ class GameObject {
 
   /// Canonical text for state digests.
   String digest() =>
-      '$id|$cardID|$owner|${zone.name}|$controller|$tapped|$damage|${(counters.entries.map((e) => '${e.key.name}=${e.value}').toList()..sort()).join(',')}|$enteredTurn|$attachedTo|${untilEndOfTurn.map((e) => e.digest()).join(',')}|$frozen|$sacrificeAtEnd|${(activatedThisTurn.toList()..sort()).join(',')}|${exiledWithThis.join(',')}|$assimilated|$attacking|$blocking|${token == null ? '' : token!.props.toString()}';
+      '$id|$cardID|$owner|${zone.name}|$controller|$tapped|$damage|${(counters.entries.map((e) => '${e.key.name}=${e.value}').toList()..sort()).join(',')}|$enteredTurn|$attachedTo|${untilEndOfTurn.map((e) => e.digest()).join(',')}|$frozen|$sacrificeAtEnd|${(activatedThisTurn.toList()..sort()).join(',')}|${exiledWithThis.join(',')}|$assimilated|$attacking|$blocking|${token == null ? '' : token!.props.toString()}|$wasCast|$chosenNumber|$copiedCardID|$nonLegendary|$playableBy|$playableUntilTurn|$extraCost|${lasting.map((e) => e.digest()).join(',')}|$controlRevertsTo|$phasedOut|$exileIfDiesThisTurn|$qCopyable|$chargedThisTurn|$basePowerOverride|$baseToughnessOverride|${(usedModes.toList()..sort()).join(',')}|${exiledUntilLeaves.join(',')}';
+}
+
+/// A temporary effect that lasts until `untilTurnOf`'s next turn begins.
+class LastingEffect {
+  LastingEffect(this.effect, this.untilTurnOf);
+  final TemporaryEffect effect;
+  final PlayerID untilTurnOf;
+  String digest() => '${effect.digest()}@$untilTurnOf';
 }
 
 sealed class TemporaryEffect with Props {
@@ -72,6 +113,17 @@ class CantBlockEffect extends TemporaryEffect {
   String digest() => 'cantblock';
 }
 
+/// "becomes a Doctor" (replace) / "become Warriors in addition to their other types".
+class TypeEffect extends TemporaryEffect {
+  const TypeEffect(this.subtype, {this.replace = false});
+  final String subtype;
+  final bool replace;
+  @override
+  List<Object?> get props => [subtype, replace];
+  @override
+  String digest() => 'type$subtype$replace';
+}
+
 class PlayerState {
   PlayerState({required this.id, required this.name, this.isBot = false});
   final PlayerID id;
@@ -90,9 +142,24 @@ class PlayerState {
   bool lost = false;
   int spellsCastThisTurn = 0;
   int lifeGainedThisTurn = 0;
+  int noncreatureSpellsThisTurn = 0;
+  int spellsCastThisGame = 0;
+  int permanentsReturnedToHandThisTurn = 0;
+  int cardsDrawnThisTurn = 0;
+  int dilemmasThisTurn = 0;
+  int opponentsAttackedThisTurn = 0;
+  /// The Holodeck's once-per-turn play from the graveyard is used.
+  bool usedGraveyardPlayThisTurn = false;
+  /// Brad Boimler: counters put on your permanents get one more until end of turn.
+  bool extraCounterThisTurn = false;
+  /// Peace in Our Time: took the offered card, so can't attack this turn.
+  bool cantAttackThisTurn = false;
+  /// Mana added by abilities like Starfleet Academy's, by color symbol ('C' colorless), spent
+  /// before tapping sources and emptied as steps end.
+  Map<String, int> manaPool = {};
 
   String digest() =>
-      '$id|$name|$life|${library.join(',')}|${hand.join(',')}|${battlefield.join(',')}|${graveyard.join(',')}|${exile.join(',')}|$landsPlayedThisTurn|$noMaxHandSizeUntilNextTurn|$mulligans|$keptHand|$lost|$spellsCastThisTurn';
+      '$id|$name|$life|${library.join(',')}|${hand.join(',')}|${battlefield.join(',')}|${graveyard.join(',')}|${exile.join(',')}|$landsPlayedThisTurn|$noMaxHandSizeUntilNextTurn|$mulligans|$keptHand|$lost|$spellsCastThisTurn|$noncreatureSpellsThisTurn|$spellsCastThisGame|$permanentsReturnedToHandThisTurn|$cardsDrawnThisTurn|$dilemmasThisTurn|$opponentsAttackedThisTurn|$usedGraveyardPlayThisTurn|$extraCounterThisTurn|$cantAttackThisTurn|${(manaPool.entries.map((e) => '${e.key}${e.value}').toList()..sort()).join(',')}';
 }
 
 enum Phase {
@@ -186,6 +253,22 @@ class PayOrCounterDecision extends Decision {
   final String prompt;
   final ManaCost cost;
   final ObjectID spell;
+}
+
+/// Choose between `min` and `max` of these cards (from a library, a hand or exile).
+class ChooseCardsDecision extends Decision {
+  const ChooseCardsDecision(this.prompt, this.cards, {this.min = 0, this.max = 1});
+  final String prompt;
+  final List<ObjectID> cards;
+  final int min, max;
+}
+
+/// Choose one or more modes (answered with CardsResponse holding mode indices).
+class ChooseModesDecision extends Decision {
+  const ChooseModesDecision(this.prompt, this.modes, {this.min = 1, this.max = 1});
+  final String prompt;
+  final List<String> modes;
+  final int min, max;
 }
 
 class DiscoverDecision extends Decision {
@@ -328,7 +411,7 @@ class DiscoverResponse extends DecisionResponse {
 
 /// The continuation of an interrupted effect sequence.
 class Resume {
-  Resume({required this.source, required this.controller, required this.effects, required this.context, required this.kind, this.modes, this.optionalEffects, this.sacrificeFilter, this.subject});
+  Resume({required this.source, required this.controller, required this.effects, required this.context, required this.kind, this.modes, this.optionalEffects, this.sacrificeFilter, this.subject, this.effect, List<ObjectID>? cards}) : cards = cards ?? [];
   ObjectID? source;
   PlayerID controller;
   List<Effect> effects;
@@ -340,14 +423,17 @@ class Resume {
 
   /// The object a decision is about (the spell a pay-or-counter decision may counter).
   ObjectID? subject;
+  /// The effect waiting on this choice, and the cards it is choosing among.
+  Effect? effect;
+  List<ObjectID> cards;
 }
 
-enum ResumeKind { targets, mode, optional, surveil, scry, explore, discover, sacrifice, none, cleanup, blockers, mulligan, payOrCounter }
+enum ResumeKind { targets, mode, optional, surveil, scry, explore, discover, sacrifice, none, cleanup, blockers, mulligan, payOrCounter, chooseNumber, chooseCards, topOrBottom, chooseColor, peace, chooseModes }
 
 /// A spell waiting to resolve. Abilities resolve at once; only spells use the stack, which is
 /// what lets the other player respond to them (and counter them).
 class StackItem {
-  StackItem({required this.id, required this.controller, required this.effects, required this.context, this.fromGraveyard = false, this.x = 0});
+  StackItem({required this.id, required this.controller, required this.effects, required this.context, this.fromGraveyard = false, this.x = 0, this.sunburst = 0});
 
   /// The card object, now in Zone.stack.
   final ObjectID id;
@@ -361,10 +447,37 @@ class StackItem {
   final bool fromGraveyard;
   final int x;
 
+  /// Colors of mana spent to cast it (Sunburst).
+  final int sunburst;
+
   /// Whether the other player has had their chance to respond.
   bool windowOffered = false;
 
-  String digest() => '$id:$controller:$fromGraveyard:$x:$windowOffered:${context.targets.join(',')}:${context.kicked}';
+  String digest() => '$id:$controller:$fromGraveyard:$x:$sunburst:$windowOffered:${context.targets.join(',')}:${context.kicked}';
+}
+
+/// "When that creature dies this turn, ...", "At the beginning of the next combat this turn, ...".
+enum DelayedEvent { dies, nextCombat }
+
+class DelayedTrigger {
+  DelayedTrigger({required this.event, required this.object, required this.controller, required this.source, required this.effects, required this.turn});
+  final DelayedEvent event;
+  final ObjectID object;
+  final PlayerID controller;
+  final ObjectID source;
+  final List<Effect> effects;
+  /// Only during this turn.
+  final int turn;
+  String digest() => '${event.name}:$object:$controller:$source:${effects.length}:$turn';
+}
+
+/// A triggered ability waiting for an open decision to finish.
+class QueuedTrigger {
+  QueuedTrigger({required this.source, required this.controller, required this.effects, required this.context});
+  final ObjectID source;
+  final PlayerID controller;
+  final List<Effect> effects;
+  final EffectContext context;
 }
 
 class PendingDecision {
@@ -384,6 +497,16 @@ class EffectContext {
 
   /// The value chosen for X when the spell was cast.
   int x = 0;
+  /// A number carried by the triggering event (combat damage dealt...).
+  int eventAmount = 0;
+  /// Objects an effect affected, for "each of those creatures" and "this way" counts.
+  List<ObjectID> affected = [];
+  /// How many things the last counting effect did "this way".
+  int counted = 0;
+  /// Creature types of what was sacrificed to pay for this ("If you sacrificed a Klingon").
+  Set<String> sacrificedSubtypes = {};
+  /// Which time this ability has resolved this turn (Captain Burnham).
+  int resolution = 0;
   ObjectID? triggeringObject;
 
   static ObjectID playerObject(PlayerID p) => -1 - p;
@@ -395,6 +518,11 @@ class EffectContext {
     ..kicked = kicked
     ..previousHappened = previousHappened
     ..x = x
+    ..eventAmount = eventAmount
+    ..affected = List.of(affected)
+    ..counted = counted
+    ..sacrificedSubtypes = Set.of(sacrificedSubtypes)
+    ..resolution = resolution
     ..triggeringObject = triggeringObject;
 }
 
@@ -451,6 +579,18 @@ class GameState {
   /// Spells cast and not yet resolved, last one on top.
   List<StackItem> stack = [];
 
+  /// Triggers that fired while a decision was open, resolved in order once it closes.
+  List<QueuedTrigger> queuedTriggers = [];
+
+  /// Keys of "only once each turn" triggers that already fired this turn.
+  Set<String> firedThisTurn = {};
+
+  /// Delayed triggers set up this turn.
+  List<DelayedTrigger> delayed = [];
+
+  /// How many times an ability resolved this turn, by key (Captain Burnham's "second time").
+  Map<String, int> resolvedCounts = {};
+
   /// The player who may respond right now (cast an instant, or pass), when it isn't simply the
   /// active player's turn to act.
   PlayerID? priority;
@@ -468,7 +608,15 @@ class GameState {
   }
 
   GameObject? object(ObjectID id) => objects[id];
+  /// The permanents a player controls, leaving out phased-out ones (which are treated as though
+  /// they don't exist).
   List<GameObject> permanentsOf(PlayerID p) => [
+    for (final id in players[p].battlefield)
+      if (objects[id] != null && !objects[id]!.phasedOut) objects[id]!,
+  ];
+
+  /// Every permanent on a player's side, phased out or not.
+  List<GameObject> allOnBattlefieldOf(PlayerID p) => [
     for (final id in players[p].battlefield)
       if (objects[id] != null) objects[id]!,
   ];
@@ -491,6 +639,8 @@ class GameState {
     b.writeln('combat=${combat.attackers.join(',')}|${(combat.blockers.entries.map((e) => '${e.key}>${e.value}').toList()..sort()).join(',')}|${combat.defender}');
     b.writeln('cont=${turnContinuation.map((s) => s.name).join(',')}');
     b.writeln('stack=${stack.map((s) => s.digest()).join(';')} priority=$priority');
+    b.writeln('queued=${queuedTriggers.map((q) => '${q.source}:${q.effects.length}').join(',')} fired=${(firedThisTurn.toList()..sort()).join(',')}');
+    b.writeln('delayed=${delayed.map((d) => d.digest()).join(',')} resolved=${(resolvedCounts.entries.map((e) => '${e.key}=${e.value}').toList()..sort()).join(',')}');
     return b.toString();
   }
 }

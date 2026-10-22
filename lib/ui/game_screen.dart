@@ -213,6 +213,69 @@ class _GameScreenState extends State<GameScreen> {
             : null),
       );
 
+  /// Pick between `min` and `max` items: card faces (returned as object ids) or text labels
+  /// (returned as indices).
+  void showPickSheet(String title, {List<ObjectID> cards = const [], List<String> labels = const [], required int min, required int max, required void Function(List<int>) onDone}) {
+    final chosen = <int>{};
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: LCARS.panel,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheet) {
+          final n = cards.isNotEmpty ? cards.length : labels.length;
+          void toggle(int i) => setSheet(() {
+                if (!chosen.remove(i)) {
+                  if (max == 1) chosen.clear();
+                  if (chosen.length < max) chosen.add(i);
+                }
+              });
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                LcarsHeader(title, color: LCARS.gold),
+                const SizedBox(height: 6),
+                if (cards.isNotEmpty)
+                  SizedBox(
+                    height: 200,
+                    child: ListView(scrollDirection: Axis.horizontal, children: [
+                      for (var i = 0; i < n; i++)
+                        GestureDetector(
+                          onTap: () => toggle(i),
+                          onLongPress: () => inspect(cards[i]),
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: chosen.contains(i) ? LCARS.gold : Colors.transparent, width: 3)),
+                            child: CardFace(card: game.card(cards[i]), width: 130),
+                          ),
+                        ),
+                    ]),
+                  )
+                else
+                  for (var i = 0; i < n; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: LcarsButton(labels[i], color: LCARS.lavender, fill: chosen.contains(i), height: 36, onPressed: () => toggle(i)),
+                    ),
+                const SizedBox(height: 8),
+                Text(min == 0 ? 'Choose up to $max (or none)' : (min == max ? 'Choose $min' : 'Choose $min to $max'), style: LCARS.small.copyWith(color: LCARS.gray)),
+                const SizedBox(height: 6),
+                LcarsButton('Done', color: LCARS.gold, height: 38, onPressed: chosen.length >= min && chosen.length <= max
+                    ? () {
+                        Navigator.pop(sheetContext);
+                        final picks = chosen.toList()..sort();
+                        onDone(cards.isNotEmpty ? [for (final i in picks) cards[i]] : picks);
+                      }
+                    : null),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _showSheet(String title, List<Widget> items) {
     showModalBottomSheet<void>(
       context: context,
@@ -946,7 +1009,22 @@ class _GameScreenState extends State<GameScreen> {
         return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
           const SizedBox(height: 4),
-          Row(children: [for (var i = 0; i < c.modes.length; i++) ...[Expanded(child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 34, onPressed: () => perform(RespondAction(ModeResponse(i))))), if (i < c.modes.length - 1) const SizedBox(width: 4)]]),
+          if (c.modes.every((m) => m.length <= 8) && c.modes.length > 3)
+            Wrap(spacing: 4, runSpacing: 4, children: [for (var i = 0; i < c.modes.length; i++) SizedBox(width: 52, child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 32, onPressed: () => perform(RespondAction(ModeResponse(i)))))])
+          else if (c.modes.length <= 2 && c.modes.every((m) => m.length <= 24))
+            Row(children: [for (var i = 0; i < c.modes.length; i++) ...[Expanded(child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 34, onPressed: () => perform(RespondAction(ModeResponse(i))))), if (i < c.modes.length - 1) const SizedBox(width: 4)]])
+          else
+            LcarsButton('Choose', color: LCARS.lavender, height: 34, onPressed: () => _showSheet(c.prompt, [for (var i = 0; i < c.modes.length; i++) _sheetButton(c.modes[i], () => perform(RespondAction(ModeResponse(i))), color: LCARS.lavender)])),
+        ]);
+      case ChooseModesDecision c:
+        return Row(children: [
+          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+          _small('Choose', () => showPickSheet(c.prompt, labels: c.modes, min: c.min, max: c.max, onDone: (picks) => perform(RespondAction(CardsResponse(picks)))), color: LCARS.gold, width: 80),
+        ]);
+      case ChooseCardsDecision c:
+        return Row(children: [
+          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+          _small('Choose', () => showPickSheet(c.prompt, cards: c.cards, min: c.min, max: c.max, onDone: (picks) => perform(RespondAction(CardsResponse(picks)))), color: LCARS.gold, width: 80),
         ]);
       case ChooseOptionalDecision c:
         return Row(children: [

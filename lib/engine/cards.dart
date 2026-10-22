@@ -329,6 +329,19 @@ class CardDatabase {
   /// The abilities parsed from a card's rules text, cached.
   ParsedCard parsed(Card card) => _parsed.putIfAbsent(card.id, () => AbilityParser.parse(card));
 
+  final Map<String, ParsedCard> _tokenParsed = {};
+
+  /// A created token's abilities, from its rules text ("{T}, Sacrifice ~: Add one mana of any
+  /// color.") and keywords.
+  ParsedCard parsedToken(TokenSpec t) {
+    final key = '${t.name}|${t.isLand}|${t.isCreature}|${t.isArtifact}|${t.text}';
+    return _tokenParsed.putIfAbsent(key, () {
+      final types = [if (t.isArtifact) 'Artifact', if (t.isCreature) 'Creature', if (t.isLand) 'Land'];
+      final card = Card(id: 'token:$key', name: t.name.isEmpty ? 'Token' : t.name, file: '', typeLine: '${types.join(' ')} — ${t.subtypes.join(' ')}', types: types, subtypes: t.subtypes, supertypes: [if (t.isLegendary) 'Legendary'], oracleText: t.text, token: true);
+      return AbilityParser.parse(card);
+    });
+  }
+
   /// Cards whose rules text the engine implements completely.
   List<Card> get fullySupportedCards => distinctCards.where((c) => parsed(c).fullySupported).toList();
 }

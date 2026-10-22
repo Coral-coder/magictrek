@@ -166,6 +166,7 @@ class Game {
     final o = state.objects[id];
     if (o == null) return;
     final wasOnBattlefield = o.zone == Zone.battlefield;
+    final wasInGraveyard = o.zone == Zone.graveyard;
     _removeFromZone(id);
     if (wasOnBattlefield) {
       for (final other in state.allPermanents) {
@@ -175,7 +176,8 @@ class Game {
         }
       }
     }
-    if (o.isToken && zone != Zone.battlefield) {
+    final returning = wasOnBattlefield ? List.of(o.exiledUntilLeaves) : const <ObjectID>[];
+    if (o.isToken && zone != Zone.battlefield && zone != Zone.stack) {
       state.objects.remove(id);
       return;
     }
@@ -192,7 +194,26 @@ class Game {
     o.blocking = null;
     o.assimilated = false;
     o.exiledWithThis = [];
+    o.wasCast = false;
+    o.chosenNumber = null;
+    o.copiedCardID = null;
+    o.nonLegendary = false;
+    o.lasting = [];
+    o.controlRevertsTo = null;
+    o.phasedOut = false;
+    o.exileIfDiesThisTurn = false;
+    o.chargedThisTurn = false;
+    o.basePowerOverride = null;
+    o.baseToughnessOverride = null;
+    o.playableBy = null;
+    o.playableUntilTurn = 0;
+    o.extraCost = 0;
+    o.qCopyable = false;
+    o.usedModes = {};
+    o.exiledUntilLeaves = [];
+    o.addedTypes = [];
     o.controller = (zone == Zone.battlefield || zone == Zone.stack) ? (controller ?? o.owner) : o.owner;
+    if (wasOnBattlefield && zone == Zone.hand) state.players[o.owner].permanentsReturnedToHandThisTurn++;
     if (zone == Zone.battlefield) o.enteredTurn = state.turn;
     final owner = state.players[o.owner];
     switch (zone) {
@@ -213,11 +234,24 @@ class Game {
       case Zone.stack:
         break;
     }
+    for (final r in returning) {
+      if (state.objects[r]?.zone != Zone.exile) continue;
+      move(r, Zone.battlefield, controller: state.objects[r]!.owner);
+      log(GameEvent('returned', object: r));
+      enteredBattlefield(r, untapped: true);
+    }
+    if (wasInGraveyard && zone != Zone.graveyard) {
+      for (final other in state.permanentsOf(o.owner)) {
+        fireTriggers(SimpleTrigger.cardLeavesYourGraveyard, other.id, touched: id);
+      }
+    }
   }
 
   void _draw(PlayerID p, int n) {
+    // Mr. Spock: each draw becomes two.
+    final perDraw = controlsStatic(p, SimpleStaticKind.drawTwoInstead) ? 2 : 1;
     var drawn = 0;
-    for (var i = 0; i < n; i++) {
+    for (var i = 0; i < n * perDraw; i++) {
       final lib = state.players[p].library;
       if (lib.isEmpty) {
         _lose(p, '${state.players[p].name} drew from an empty library');
@@ -225,6 +259,15 @@ class Game {
       }
       move(lib.first, Zone.hand);
       drawn++;
+      final ps = state.players[p];
+      ps.cardsDrawnThisTurn++;
+      for (final o in state.permanentsOf(p)) {
+        fireTriggers(SimpleTrigger.youDraw, o.id);
+        if (ps.cardsDrawnThisTurn == 2) fireTriggers(SimpleTrigger.secondCardDrawn, o.id);
+      }
+      for (final o in state.permanentsOf(state.opponentOf(p))) {
+        fireTriggers(SimpleTrigger.opponentDraws, o.id, touched: EffectContext.playerObject(p));
+      }
     }
     if (drawn > 0) log(GameEvent('drew', player: p, amount: drawn));
   }
@@ -252,9 +295,40 @@ class Game {
     ps.spellsCastThisTurn = 0;
     ps.lifeGainedThisTurn = 0;
     ps.noMaxHandSizeUntilNextTurn = false;
+    for (final q in state.players) {
+      q.noncreatureSpellsThisTurn = 0;
+      q.permanentsReturnedToHandThisTurn = 0;
+      q.cardsDrawnThisTurn = 0;
+      q.dilemmasThisTurn = 0;
+      q.opponentsAttackedThisTurn = 0;
+      q.usedGraveyardPlayThisTurn = false;
+      q.extraCounterThisTurn = false;
+      q.cantAttackThisTurn = false;
+    }
+    state.firedThisTurn.clear();
+    state.resolvedCounts.clear();
+    state.delayed.clear();
     log(GameEvent('turnBegan', amount: state.turn, player: p));
+    for (final q in state.players) {
+      for (final o in state.allOnBattlefieldOf(q.id)) {
+        o.chargedThisTurn = false;
+        o.lasting.removeWhere((l) => l.untilTurnOf == p);
+      }
+    }
+    // Phasing: your phased-out permanents phase back in, unless something says they can't.
+    final cantPhaseIn = state.allPermanents.any((o) => staticsOf(o).any((s) => s is SimpleStatic && s.kind == SimpleStaticKind.permanentsCantPhaseIn));
+    if (!cantPhaseIn) {
+      for (final o in state.allOnBattlefieldOf(p)) {
+        if (o.phasedOut) {
+          o.phasedOut = false;
+          log(GameEvent('phasedIn', object: o.id));
+        }
+      }
+    }
     for (final o in state.permanentsOf(p)) {
       o.activatedThisTurn = {};
+      final held = state.allPermanents.any((a) => a.attachedTo == o.id && staticsOf(a).any((s) => s is SimpleStatic && s.kind == SimpleStaticKind.attachedDoesntUntap));
+      if (o.tapped && held) continue;
       if (o.tapped) {
         if (o.frozen) {
           o.frozen = false;
@@ -294,12 +368,24 @@ class Game {
       state.turnContinuation.add(TurnStep.main1);
       return;
     }
+    _beginMain1();
+  }
+
+  void _beginMain1() {
     state.phase = Phase.main1;
     log(GameEvent('phase', phase: Phase.main1));
+    for (final o in state.permanentsOf(state.activePlayer)) {
+      fireTriggers(SimpleTrigger.firstMain, o.id);
+    }
   }
 
   void _runContinuations() {
     while (state.pending == null && state.priority == null && !state.isOver) {
+      if (state.queuedTriggers.isNotEmpty) {
+        final q = state.queuedTriggers.removeAt(0);
+        resolve(q.effects, source: q.source, controller: q.controller, context: q.context);
+        continue;
+      }
       if (state.stack.isNotEmpty) {
         _resolveStack();
         continue;
@@ -318,8 +404,7 @@ class Game {
         case TurnStep.drawStep:
           _drawStep(state.turn == 1);
         case TurnStep.main1:
-          state.phase = Phase.main1;
-          log(GameEvent('phase', phase: Phase.main1));
+          _beginMain1();
         case TurnStep.blockers:
           _askBlockers();
         case TurnStep.combatDamage:
@@ -342,9 +427,7 @@ class Game {
       case Phase.main1:
         state.phase = Phase.beginCombat;
         log(GameEvent('phase', phase: Phase.beginCombat));
-        for (final o in state.permanentsOf(state.activePlayer)) {
-          fireTriggers(SimpleTrigger.beginCombat, o.id);
-        }
+        _beginCombatTriggers();
         state.phase = Phase.declareAttackers;
         log(GameEvent('phase', phase: Phase.declareAttackers));
       case Phase.beginCombat:
@@ -375,10 +458,7 @@ class Game {
       fireTriggers(SimpleTrigger.endStep, o.id);
     }
     for (final o in state.allPermanents) {
-      if (o.sacrificeAtEnd) {
-        move(o.id, Zone.graveyard);
-        log(GameEvent('died', object: o.id));
-      }
+      if (o.sacrificeAtEnd) dies(o.id);
     }
     state.turnContinuation.add(TurnStep.endWindow);
     state.turnContinuation.add(TurnStep.cleanup);
@@ -388,7 +468,7 @@ class Game {
     state.phase = Phase.cleanup;
     final p = state.activePlayer;
     final ps = state.players[p];
-    final noMax = ps.noMaxHandSizeUntilNextTurn || state.permanentsOf(p).any((o) => parsedOf(o)?.statics.contains(SimpleStatic.noMaxHandSize) == true);
+    final noMax = ps.noMaxHandSizeUntilNextTurn || controlsStatic(p, SimpleStaticKind.noMaxHandSize);
     if (!noMax && rules.maxHandSize && ps.hand.length > rules.handSize) {
       state.pending = PendingDecision(
         player: p,
@@ -408,8 +488,48 @@ class Game {
       o.untilEndOfTurn = [];
       o.attacking = null;
       o.blocking = null;
+      o.exileIfDiesThisTurn = false;
+      final back = o.controlRevertsTo;
+      if (back != null) {
+        o.controlRevertsTo = null;
+        if (o.controller != back) changeControl(o.id, back);
+      }
     }
     _checkStateBasedActions();
+  }
+
+  /// Moves a permanent to another player's side of the battlefield.
+  void changeControl(ObjectID id, PlayerID to) {
+    final o = state.objects[id];
+    if (o == null || o.zone != Zone.battlefield) return;
+    state.players[o.controller].battlefield.remove(id);
+    o.controller = to;
+    state.players[to].battlefield.add(id);
+    o.enteredTurn = state.turn;
+    o.attacking = null;
+    o.blocking = null;
+    log(GameEvent('controlChanged', object: id, player: to));
+  }
+
+  /// "At the beginning of combat": the active player's triggers, each player's-turn triggers,
+  /// and delayed "next combat" triggers.
+  void _beginCombatTriggers() {
+    for (final o in state.permanentsOf(state.activePlayer)) {
+      fireTriggers(SimpleTrigger.beginCombat, o.id);
+    }
+    for (final o in state.allPermanents) {
+      fireTriggers(SimpleTrigger.eachBeginCombat, o.id, touched: EffectContext.playerObject(state.activePlayer));
+    }
+    final due = state.delayed.where((d) => d.event == DelayedEvent.nextCombat && d.turn == state.turn).toList();
+    state.delayed.removeWhere(due.contains);
+    for (final d in due) {
+      if (state.objects[d.source] == null) continue;
+      final ctx = EffectContext()
+        ..lastTouched = d.object
+        ..triggeringObject = d.object;
+      log(GameEvent('triggered', object: d.source, text: name(d.source)));
+      resolve(d.effects, source: d.source, controller: d.controller, context: ctx);
+    }
   }
 
   // MARK: - Playing cards
@@ -435,8 +555,15 @@ class Game {
         }
       }
     }
+    final landFrom = state.objects[id]!.zone;
+    if (landFrom == Zone.graveyard) state.players[p].usedGraveyardPlayThisTurn = true;
     move(id, Zone.battlefield, controller: p, tapped: tapped);
     log(GameEvent('playedLand', player: p, object: id));
+    if (landFrom == Zone.exile) {
+      for (final other in state.permanentsOf(p)) {
+        fireTriggers(SimpleTrigger.playFromExile, other.id, touched: id);
+      }
+    }
     enteredBattlefield(id, untapped: !tapped);
     for (final o in state.permanentsOf(p)) {
       if (o.id != id) fireTriggers(SimpleTrigger.landfall, o.id, touched: id);
@@ -452,10 +579,24 @@ class Game {
     final parsed = db.parsed(card);
     var cost = card.cost;
     var fromGraveyard = false;
-    if (o.zone == Zone.graveyard) {
+    if (o.zone == Zone.exile && o.qCopyable && o.owner == p) {
+      // Q: exile a card from your hand to create a copy of this card, and cast the copy.
+      final hand = state.players[p].hand;
+      if (hand.isEmpty || state.activePlayer != p) throw GameError("Can't copy that now");
+      final payment = Bot.discardChoice(this, p, 1).first;
+      move(payment, Zone.exile);
+      log(GameEvent('exiled', object: payment));
+      final copy = newObject(cardID: o.cardID, owner: p, zone: Zone.hand, token: TokenSpec(name: card.name, power: card.basePower, toughness: card.baseToughness, isArtifact: card.isArtifact, isCreature: card.isCreature, isLand: card.isLand, isLegendary: card.isLegendary));
+      hand.add(copy);
+      log(GameEvent('copied', object: id, other: copy, player: p));
+      _cast(copy, targets: targets, kicked: kicked, mode: mode, x: x);
+      return;
+    }
+    final fromZone = o.zone;
+    if (o.zone == Zone.graveyard && beamUpBounce != null) {
       final beam = parsed.beamMeUp;
-      final b = beamUpBounce == null ? null : state.objects[beamUpBounce];
-      if (beam == null || o.owner != p || b == null || b.zone != Zone.battlefield || b.controller != p || !characteristics(beamUpBounce!).isCreature) throw GameError("Can't beam that up");
+      final b = state.objects[beamUpBounce];
+      if (beam == null || o.owner != p || b == null || b.zone != Zone.battlefield || b.controller != p || !characteristics(beamUpBounce).isCreature) throw GameError("Can't beam that up");
       if (!_timingAllows(card, p)) throw GameError("Can't cast that now");
       cost = beam.copy();
       fromGraveyard = true;
@@ -464,11 +605,21 @@ class Game {
     }
     if (x < 0) throw GameError('X must be 0 or more');
     if (!card.cost.hasX) x = 0;
-    cost.generic += x;
+    cost.generic += x + o.extraCost;
+    ObjectID? kickerSacrifice;
     if (kicked) {
       final k = parsed.kicker;
-      if (k == null) throw GameError('No kicker');
-      cost.add(k);
+      final sk = parsed.abilities.whereType<SacrificeKicker>().firstOrNull;
+      if (k != null) {
+        cost.add(k);
+      } else if (sk != null) {
+        final f = sk.filter.copy()..controller = Controller.you;
+        final options = state.permanentsOf(p).where((c) => matches(f, c.id, p, id)).map((c) => c.id).toList();
+        if (options.isEmpty) throw GameError('Nothing to sacrifice for kicker');
+        kickerSacrifice = Bot.sacrificeChoice(this, options);
+      } else {
+        throw GameError('No kicker');
+      }
     }
     final reqs = targetRequirementsForCard(card, mode);
     _validateTargets(targets, reqs, p, id);
@@ -478,14 +629,20 @@ class Game {
         if (tgt != null && tgt.zone == Zone.battlefield && tgt.controller != p) cost.generic += characteristics(t).wardCost;
       }
     }
-    final plan = manaPlan(cost, p);
+    reduceCost(cost, card, p, targets);
+    final plan = manaPlan(cost, p, forSpell: card);
     if (plan == null) throw GameError('Not enough mana');
+    final sunburst = parsed.abilities.any((a) => a is Sunburst) ? sunburstColors(plan) : 0;
     _payMana(plan);
+    if (kickerSacrifice != null) dies(kickerSacrifice, event: 'sacrificed');
+    if (fromZone == Zone.graveyard && beamUpBounce == null) state.players[p].usedGraveyardPlayThisTurn = true;
     if (fromGraveyard && beamUpBounce != null) {
       move(beamUpBounce, Zone.hand);
       log(GameEvent('bounced', object: beamUpBounce));
     }
     state.players[p].spellsCastThisTurn++;
+    state.players[p].spellsCastThisGame++;
+    if (!card.isCreature) state.players[p].noncreatureSpellsThisTurn++;
     move(id, Zone.stack, controller: p);
     final context = EffectContext()
       ..targets = List.of(targets)
@@ -500,21 +657,79 @@ class Game {
         if (mode < modes.length) effects = [...effects.sublist(0, mi), ...modes[mode], ...effects.sublist(mi + 1)];
       }
     }
-    state.stack.add(StackItem(id: id, controller: p, effects: effects, context: context, fromGraveyard: fromGraveyard, x: x));
+    state.stack.add(StackItem(id: id, controller: p, effects: effects, context: context, fromGraveyard: fromGraveyard, x: x, sunburst: sunburst));
     log(GameEvent('cast', player: p, object: id, amount: kicked ? 1 : 0));
-    final kind = card.isCreature ? SpellKind.creature : SpellKind.noncreature;
-    for (final other in state.allPermanents) {
-      if (other.controller != p) continue;
-      for (final (event, fx) in grantedAndOwnTriggers(other.id)) {
-        if (event is CastSpellTrigger) {
-          final k = event.kind;
-          if (k == SpellKind.any || k == kind || (k == SpellKind.artifact && card.isArtifact) || (k == SpellKind.instantOrSorcery && (card.isInstant || card.isSorcery))) {
-            runTrigger(fx, source: other.id, touched: id);
-          }
-        }
+    // "When you cast this spell" (Starfleet Communicator).
+    for (final (i, a) in parsed.abilities.indexed) {
+      if (a is Triggered && a.event == SimpleTrigger.castThis) fireTrigger(a, '$id:$i', source: id, touched: id, leftBattlefield: true);
+    }
+    _castTriggers(card, id, p, x);
+    if (fromZone == Zone.exile) {
+      for (final other in state.permanentsOf(p)) {
+        fireTriggers(SimpleTrigger.playFromExile, other.id, touched: id);
       }
     }
     _runContinuations();
+  }
+
+  /// "Whenever you cast / a player casts / an opponent casts a ... spell".
+  void _castTriggers(Card card, ObjectID id, PlayerID caster, int x) {
+    for (final other in state.allPermanents) {
+      for (final (t, key) in triggersOf(other.id)) {
+        final event = t.event;
+        if (event is! CastSpellTrigger) continue;
+        final mine = other.controller == caster;
+        if (event.who == Controller.you && !mine) continue;
+        if (event.who == Controller.opponent && mine) continue;
+        if (event.manaValueIsChosenNumber && other.chosenNumber != card.manaValue + x) continue;
+        final ok = switch (event.kind) {
+          SpellKind.any => true,
+          SpellKind.creature => card.isCreature,
+          SpellKind.noncreature => !card.isCreature,
+          SpellKind.artifact => card.isArtifact,
+          SpellKind.instantOrSorcery => card.isInstant || card.isSorcery,
+          SpellKind.creatureOrSpacecraft => card.isCreature || card.isSpacecraft,
+        };
+        if (ok) fireTrigger(t, key, source: other.id, touched: id);
+      }
+    }
+  }
+
+  /// Cost reductions: affinity, "costs {1} less if it targets an attacking creature".
+  void reduceCost(ManaCost cost, Card card, PlayerID p, List<ObjectID> targets) {
+    var less = 0;
+    for (final a in db.parsed(card).abilities) {
+      if (a is Affinity) less += state.permanentsOf(p).where((o) => matches(a.filter, o.id, p, null)).length;
+      if (a is CostReductionIfTargetsAttacker && targets.any((t) => state.objects[t]?.attacking != null)) less += a.amount;
+    }
+    cost.generic = (cost.generic - less).clamp(0, 1 << 30);
+  }
+
+  /// The most distinct colors the sources in a mana plan could have produced (sunburst).
+  int sunburstColors(List<ObjectID> plan) {
+    final options = <List<ManaColor>>[];
+    for (final id in plan) {
+      final o = state.objects[id];
+      if (o == null) continue;
+      final p = parsedOf(o);
+      final colors = <ManaColor>{...?p?.manaColors};
+      for (final a in p?.abilities ?? const <Ability>[]) {
+        if (a is Activated && a.effects.length == 1 && a.effects[0] is AddMana) colors.addAll((a.effects[0] as AddMana).colors);
+      }
+      options.add(colors.toList());
+    }
+    var best = 0;
+    void search(int i, Set<ManaColor> used) {
+      if (used.length > best) best = used.length;
+      if (i >= options.length || best == 5) return;
+      for (final c in options[i]) {
+        if (used.contains(c)) continue;
+        search(i + 1, {...used, c});
+      }
+      search(i + 1, used);
+    }
+    search(0, {});
+    return best;
   }
 
   /// Whether the card's type lets `p` cast it at this moment (ignoring cost and zone).
@@ -563,7 +778,7 @@ class Game {
         }
         state.objects[item.id]!.attachedTo = host;
       }
-      enteredBattlefield(item.id, untapped: true, castBy: item.controller, x: item.x);
+      enteredBattlefield(item.id, untapped: true, castBy: item.controller, x: item.x, sunburst: item.sunburst);
     } else {
       resolve(item.effects, source: item.id, controller: item.controller, context: item.context);
       if (state.objects[item.id]?.zone == Zone.stack) move(item.id, item.fromGraveyard ? Zone.exile : Zone.graveyard);
@@ -609,12 +824,33 @@ class Game {
   }
 
   void _payMana(List<ObjectID> plan) {
+    // Pool mana first: work out which symbol each pseudo source stood for before spending any.
+    final spend = <(PlayerID, String)>[];
     for (final id in plan) {
+      if (id > -1000) continue;
+      final p = (-1000 - id) ~/ 100;
+      var i = (-1000 - id) % 100;
+      final pool = state.players[p].manaPool;
+      for (final k in (pool.keys.toList()..sort())) {
+        if (i < pool[k]!) {
+          spend.add((p, k));
+          break;
+        }
+        i -= pool[k]!;
+      }
+    }
+    for (final (p, k) in spend) {
+      final pool = state.players[p].manaPool;
+      pool[k] = (pool[k] ?? 1) - 1;
+      if (pool[k]! <= 0) pool.remove(k);
+    }
+    for (final id in plan) {
+      if (id <= -1000) continue;
       final o = state.objects[id];
       if (o == null) continue;
       final parsed = parsedOf(o);
-      if (parsed != null && parsed.abilities.any((a) => a is Activated && a.cost.sacrificeSelf && a.cost.tap)) {
-        move(id, Zone.graveyard); // Treasure
+      if (parsed != null && parsed.abilities.any((a) => a is Activated && a.cost.sacrificeSelf && a.cost.tap && a.effects.length == 1 && a.effects[0] is AddMana)) {
+        dies(id, event: 'sacrificed'); // Treasure
       } else {
         o.tapped = true;
         log(GameEvent('tapped', object: id));
@@ -624,20 +860,47 @@ class Game {
   }
 
   /// `castBy` is set when the permanent arrived by being cast (for "if you cast it"); `x` is the
-  /// value of X it was cast with.
-  void enteredBattlefield(ObjectID id, {required bool untapped, PlayerID? castBy, int x = 0}) {
+  /// value of X it was cast with; `sunburst` the colors of mana spent on it.
+  void enteredBattlefield(ObjectID id, {required bool untapped, PlayerID? castBy, int x = 0, int sunburst = 0}) {
     final o = state.objects[id];
     if (o == null) return;
+    if (castBy != null) o.wasCast = true;
     log(GameEvent('entered', object: id));
+    final parsed = parsedOf(o);
+    final before = <Effect>[];
+    if (parsed != null) {
+      if (parsed.abilities.any((a) => a is Sunburst) && sunburst > 0) addCounters(CounterKind.charge, sunburst, id);
+      for (final a in parsed.abilities) {
+        if (a is EnterAsCopy) {
+          final f = a.filter.copy()..other = true;
+          if (legalTargets(f, o.controller, id).isNotEmpty) before.add(Optional([BecomeCopy(ChosenTarget(f), nonLegendary: a.nonLegendary, copyCounters: a.copyCounters)]));
+        }
+        if (a is ChooseNumberOnEnter) before.add(ChooseNumber(a.min, a.max));
+      }
+    }
+    if (before.isNotEmpty) {
+      // Choices made "as it enters" come before its enters triggers.
+      resolve([...before, EnterTriggers(untapped)], source: id, controller: o.controller, context: EffectContext()..lastTouched = id);
+      return;
+    }
+    enterTriggers(id, untapped: untapped);
+  }
+
+  /// The triggers of a permanent entering: its own, Sagas' first chapter, and other permanents'
+  /// "whenever a ... enters".
+  void enterTriggers(ObjectID id, {required bool untapped}) {
+    final o = state.objects[id];
+    if (o == null || o.zone != Zone.battlefield) return;
     if (cardOf(o)?.isSaga == true) _advanceSaga(id);
     fireTriggers(SimpleTrigger.enters, id);
     if (untapped) fireTriggers(SimpleTrigger.entersUntapped, id);
     final c = characteristics(id);
     for (final other in state.allPermanents) {
       if (other.id == id) continue;
-      for (final (event, fx) in grantedAndOwnTriggers(other.id)) {
+      for (final (t, key) in triggersOf(other.id)) {
+        final event = t.event;
         if (event is PermanentEntersTrigger && matches(event.filter, id, other.controller, other.id, base: c)) {
-          runTrigger(fx, source: other.id, touched: id);
+          fireTrigger(t, key, source: other.id, touched: id);
         }
       }
     }
@@ -690,13 +953,10 @@ class Game {
       log(GameEvent('discarded', player: p, object: discard));
     }
     if (sacID != null) {
-      move(sacID, Zone.graveyard);
-      log(GameEvent('died', object: sacID));
-      fireDies(sacID);
+      dies(sacID);
     }
     if (cost.sacrificeSelf) {
-      move(id, Zone.graveyard);
-      log(GameEvent('died', object: id));
+      dies(id);
     }
     o.activatedThisTurn.add(index);
     log(GameEvent('activated', object: id, text: name(id)));
@@ -791,8 +1051,11 @@ class Game {
     log(GameEvent('lifeChanged', player: p, amount: delta));
     if (delta > 0) {
       state.players[p].lifeGainedThisTurn += delta;
-      for (final o in state.permanentsOf(p)) {
-        fireTriggers(SimpleTrigger.gainLife, o.id);
+      final times = controlsStatic(p, SimpleStaticKind.lifeGainTriggersTwice) ? 2 : 1;
+      for (var i = 0; i < times; i++) {
+        for (final o in state.permanentsOf(p)) {
+          fireTriggers(SimpleTrigger.gainLife, o.id, amount: delta);
+        }
       }
     }
   }
@@ -818,56 +1081,98 @@ class Game {
 
   void addCounters(CounterKind kind, int n, ObjectID id) {
     final o = state.objects[id];
-    if (n == 0 || o == null || o.zone != Zone.battlefield) return;
-    o.counters[kind] = (o.counters[kind] ?? 0) + n;
-    log(GameEvent('counters', object: id, counter: kind, amount: n));
+    if (n <= 0 || o == null || o.zone != Zone.battlefield) {
+      if (n < 0 && o != null) {
+        o.counters[kind] = ((o.counters[kind] ?? 0) + n).clamp(0, 1 << 30);
+        if (o.counters[kind] == 0) o.counters.remove(kind);
+      }
+      return;
+    }
+    final p = o.controller;
+    var count = n;
+    // Brad Boimler: one more of each kind until end of turn.
+    if (state.players[p].extraCounterThisTurn) count += 1;
+    final c = characteristics(id);
+    if (c.isCreature && controlsStatic(p, SimpleStaticKind.doubleCountersOnCreatures)) count *= 2;
+    if (kind == CounterKind.charge && c.isArtifact && controlsStatic(p, SimpleStaticKind.doubleChargeCounters)) count *= 2;
+    o.counters[kind] = (o.counters[kind] ?? 0) + count;
+    log(GameEvent('counters', object: id, counter: kind, amount: count));
+    if (kind == CounterKind.charge && !o.chargedThisTurn) {
+      o.chargedThisTurn = true;
+      fireTriggers(SimpleTrigger.chargedFirstTime, id);
+    }
   }
 
   void destroy(ObjectID id) {
     final o = state.objects[id];
     if (o == null || o.zone != Zone.battlefield) return;
     if (characteristics(id).has(KeywordKind.indestructible)) return;
-    move(id, Zone.graveyard);
-    log(GameEvent('destroyed', object: id));
-    fireDies(id);
+    dies(id, event: 'destroyed');
   }
 
-  void fireDies(ObjectID id) {
+  /// A permanent goes from the battlefield to its owner's graveyard (destroyed, sacrificed,
+  /// lethal damage...), with its "dies" triggers and other permanents' "whenever ... dies".
+  /// Returns false if something exiled it instead.
+  bool dies(ObjectID id, {String event = 'died'}) {
     final o = state.objects[id];
-    if (o == null) return;
-    final card = cardOf(o);
-    if (card != null) {
-      final parsed = db.parsed(card);
-      for (final fx in parsed.triggers(SimpleTrigger.dies)) {
-        runTrigger(fx, source: id, touched: id, leftBattlefield: true);
-      }
-      for (final fx in parsed.triggers(SimpleTrigger.leaves)) {
-        runTrigger(fx, source: id, touched: id, leftBattlefield: true);
+    if (o == null || o.zone != Zone.battlefield) return false;
+    if (o.exileIfDiesThisTurn) {
+      move(id, Zone.exile);
+      log(GameEvent('exiled', object: id));
+      return false;
+    }
+    final c = characteristics(id);
+    final info = DeathInfo(id: id, controller: o.controller, owner: o.owner, isCreature: c.isCreature, isArtifact: c.isArtifact, isToken: o.isToken, subtypes: Set.of(c.subtypes), triggers: triggersOf(id), wasCreatureWithCounters: o.counters.isNotEmpty);
+    move(id, Zone.graveyard);
+    log(GameEvent(event == 'sacrificed' ? 'died' : event, object: id));
+    fireDies(id, info: info);
+    return true;
+  }
+
+  void fireDies(ObjectID id, {DeathInfo? info}) {
+    final o = state.objects[id];
+    final d = info ?? (o == null ? null : DeathInfo(id: id, controller: o.controller, owner: o.owner, isCreature: cardOf(o)?.isCreature ?? false, isArtifact: cardOf(o)?.isArtifact ?? false, isToken: o.isToken, subtypes: {...?cardOf(o)?.subtypes}, triggers: const [], wasCreatureWithCounters: false));
+    if (d == null) return;
+    final own = d.triggers.isNotEmpty ? d.triggers : (o == null ? const <(Triggered, String)>[] : [for (final (i, a) in (parsedOf(o)?.abilities ?? const <Ability>[]).indexed) if (a is Triggered) (a, '$id:$i')]);
+    for (final (t, key) in own) {
+      if (t.event == SimpleTrigger.dies || t.event == SimpleTrigger.leaves) {
+        if (state.objects[id] != null) fireTrigger(t, key, source: id, touched: id, leftBattlefield: true);
       }
     }
     for (final other in state.allPermanents) {
-      for (final (event, fx) in grantedAndOwnTriggers(other.id)) {
-        if (event is PermanentDiesTrigger && _matchesDead(event.filter, id, other.controller, other.id)) runTrigger(fx, source: other.id, touched: id);
+      for (final (t, key) in triggersOf(other.id)) {
+        final event = t.event;
+        if (event is PermanentDiesTrigger && _matchesDead(event.filter, d, other.controller, other.id)) fireTrigger(t, key, source: other.id, touched: id);
       }
+    }
+    final due = state.delayed.where((x) => x.event == DelayedEvent.dies && x.object == id).toList();
+    state.delayed.removeWhere(due.contains);
+    for (final x in due) {
+      final ctx = EffectContext()..lastTouched = id;
+      log(GameEvent('triggered', object: x.source, text: name(x.source)));
+      resolve(x.effects, source: x.source, controller: x.controller, context: ctx);
     }
   }
 
-  bool _matchesDead(Filter f, ObjectID id, PlayerID controller, ObjectID? source) {
-    final o = state.objects[id];
-    final c = o == null ? null : cardOf(o);
-    if (o == null || c == null) return false;
-    if (f.other && id == source) return false;
-    if (f.controller == Controller.you && o.owner != controller) return false;
-    if (f.controller == Controller.opponent && o.owner == controller) return false;
+  bool _matchesDead(Filter f, DeathInfo d, PlayerID controller, ObjectID? source) {
+    if (f.other && d.id == source) return false;
+    if (f.controller == Controller.you && d.controller != controller) return false;
+    if (f.controller == Controller.opponent && d.controller == controller) return false;
+    if (f.nontoken && d.isToken) return false;
+    if (f.subtype != null && !d.subtypes.contains(f.subtype)) return false;
     switch (f.kind) {
       case FilterKind.creature:
-        return c.isCreature;
+        return d.isCreature;
       case FilterKind.artifact:
-        return c.isArtifact;
+        return d.isArtifact;
+      case FilterKind.artifactCreature:
+        return d.isArtifact && d.isCreature;
+      case FilterKind.artifactOrCreature:
+        return d.isArtifact || d.isCreature;
       case FilterKind.permanent:
         return true;
       default:
-        return c.isCreature;
+        return d.isCreature;
     }
   }
 
@@ -891,16 +1196,12 @@ class Game {
         final c = characteristics(o.id);
         if (c.isCreature) {
           if (c.toughness <= 0) {
-            move(o.id, Zone.graveyard);
-            log(GameEvent('died', object: o.id));
-            fireDies(o.id);
+            dies(o.id);
             changed = true;
             continue;
           }
           if (o.damage >= c.toughness && !c.has(KeywordKind.indestructible)) {
-            move(o.id, Zone.graveyard);
-            log(GameEvent('died', object: o.id));
-            fireDies(o.id);
+            dies(o.id);
             changed = true;
             continue;
           }
@@ -910,20 +1211,18 @@ class Game {
           if (state.objects[host]?.zone != Zone.battlefield || (parsedOf(o)?.isAura == true && !characteristics(host).isCreature)) {
             o.attachedTo = null;
             if (parsedOf(o)?.isAura == true) {
-              move(o.id, Zone.graveyard);
-              log(GameEvent('died', object: o.id));
+              dies(o.id);
               changed = true;
             }
           }
         }
-        final legend = cardOf(o);
-        if (legend != null && legend.isLegendary) {
-          final same = state.permanentsOf(o.controller).where((x) => cardOf(x)?.name == legend.name).toList();
+        if (isLegendary(o)) {
+          final legendName = name(o.id);
+          final same = state.permanentsOf(o.controller).where((x) => isLegendary(x) && name(x.id) == legendName).toList();
           if (same.length > 1) {
             final oldest = same.reduce((a, b) => a.id < b.id ? a : b);
             if (oldest.id == o.id) {
-              move(o.id, Zone.graveyard);
-              log(GameEvent('died', object: o.id));
+              dies(o.id);
               changed = true;
             }
           }
@@ -1027,12 +1326,72 @@ class Game {
           resolve(resume.effects, source: resume.source, controller: resume.controller, context: ctx);
         }
       case ChooseModeDecision d:
-        final modes = resume.modes;
-        if (r is! ModeResponse || modes == null || r.index >= modes.length || r.index >= d.modes.length) {
+        if (r is! ModeResponse || r.index < 0 || r.index >= d.modes.length) {
           state.pending = pending;
-          throw GameError('Bad mode');
+          throw GameError('Bad choice');
         }
-        resolve([...modes[r.index], ...resume.effects], source: resume.source, controller: resume.controller, context: resume.context);
+        switch (resume.kind) {
+          case ResumeKind.chooseNumber:
+            final src = resume.source == null ? null : state.objects[resume.source!];
+            src?.chosenNumber = (resume.subject ?? 0) + r.index;
+            log(GameEvent('chose', object: resume.source, amount: src?.chosenNumber));
+            resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
+          case ResumeKind.topOrBottom:
+            final id = resume.subject!;
+            if (state.objects[id]?.zone == Zone.battlefield) {
+              move(id, Zone.library, toBottom: r.index == 1);
+              log(GameEvent('toLibrary', object: id, amount: r.index));
+            }
+            resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
+          case ResumeKind.chooseColor:
+            final color = ManaColor.values[r.index];
+            final pool = state.players[resume.controller].manaPool;
+            pool[color.symbol] = (pool[color.symbol] ?? 0) + (resume.subject ?? 0);
+            resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
+          default:
+            final modes = resume.modes;
+            if (modes == null || r.index >= modes.length) {
+              state.pending = pending;
+              throw GameError('Bad mode');
+            }
+            if (resume.cards.isNotEmpty && resume.source != null) state.objects[resume.source!]?.usedModes.add(resume.cards[r.index]);
+            resolve([...modes[r.index], ...resume.effects], source: resume.source, controller: resume.controller, context: resume.context);
+        }
+      case ChooseModesDecision d:
+        final modes = resume.modes ?? const <List<Effect>>[];
+        final picks = r is CardsResponse ? r.ids.where((i) => i >= 0 && i < modes.length).toSet().toList() : <int>[];
+        if (picks.length < d.min || picks.length > d.max) {
+          state.pending = pending;
+          throw GameError('Choose ${d.min == d.max ? d.min : '${d.min} to ${d.max}'}');
+        }
+        picks.sort();
+        resolve([for (final i in picks) ...modes[i], ...resume.effects], source: resume.source, controller: resume.controller, context: resume.context);
+      case ChooseCardsDecision d:
+        final picks = r is CardsResponse ? r.ids.where(d.cards.contains).toSet().toList() : <ObjectID>[];
+        if (picks.length < d.min || picks.length > d.max) {
+          state.pending = pending;
+          throw GameError('Choose ${d.min == d.max ? d.min : 'up to ${d.max}'}');
+        }
+        final ctx = resume.context;
+        switch (resume.effect) {
+          case LookAtTop x:
+            finishLookAtTop(x, picks, resume.cards, resume.controller);
+            ctx.previousHappened = picks.isNotEmpty;
+          case SearchCard x:
+            finishSearch(x, picks, resume.controller);
+          case HandChoice x:
+            finishHandChoice(x, picks, EffectContext.playerFromObject(resume.subject ?? -1) ?? state.opponentOf(resume.controller));
+            ctx.previousHappened = picks.isNotEmpty;
+          case ExileFromHand _:
+            for (final id in picks) {
+              move(id, Zone.exile);
+              log(GameEvent('exiled', object: id));
+            }
+            ctx.previousHappened = picks.isNotEmpty;
+          default:
+            break;
+        }
+        resolve(resume.effects, source: resume.source, controller: resume.controller, context: ctx);
       case ChooseOptionalDecision _:
         if (r is YesResponse) {
           resolve([...?resume.optionalEffects, ...resume.effects], source: resume.source, controller: resume.controller, context: resume.context);
@@ -1070,9 +1429,7 @@ class Game {
           state.pending = pending;
           throw GameError('Choose one of the candidates');
         }
-        move(r.id, Zone.graveyard);
-        log(GameEvent('died', object: r.id));
-        fireDies(r.id);
+        dies(r.id);
         resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
       case SurveilDecision d:
         if (r is! CardsResponse) {
@@ -1129,4 +1486,15 @@ class Game {
 
 extension<T> on List<T> {
   T? get firstOrNull => isEmpty ? null : first;
+}
+
+/// What a permanent was as it died, for "whenever another creature dies" (tokens cease to exist
+/// as they leave the battlefield, so this is all that's left of them).
+class DeathInfo {
+  DeathInfo({required this.id, required this.controller, required this.owner, required this.isCreature, required this.isArtifact, required this.isToken, required this.subtypes, required this.triggers, required this.wasCreatureWithCounters});
+  final ObjectID id;
+  final PlayerID controller, owner;
+  final bool isCreature, isArtifact, isToken, wasCreatureWithCounters;
+  final Set<String> subtypes;
+  final List<(Triggered, String)> triggers;
 }

@@ -67,6 +67,11 @@ class Bot {
         return CardsResponse(bottomChoice(game, p, d.count));
       case PayOrCounterDecision _:
         return const YesResponse();
+      case ChooseCardsDecision d:
+        final sorted = List.of(d.cards)..sort((a, b) => cardValue(b, game) - cardValue(a, game));
+        return CardsResponse(sorted.take(d.max).toList());
+      case ChooseModesDecision d:
+        return CardsResponse([for (var i = 0; i < d.modes.length && i < d.max; i++) i]);
       case ChooseSacrificeDecision d:
         return SacrificeResponse(sacrificeChoice(game, d.candidates));
       case SurveilDecision d:
@@ -387,6 +392,34 @@ class Bot {
     if (card.isCreature && s.phase == Phase.declareAttackers) return cast; // flash in a blocker
     return null;
   }
+
+  /// Nyota Uhura: the mana value the opponent's deck plays most.
+  static int chooseNumber(Game game, PlayerID p, int min, int max) {
+    final counts = <int, int>{};
+    final opp = game.state.opponentOf(p);
+    for (final id in [...game.state.players[opp].graveyard, ...game.state.permanentsOf(opp).map((o) => o.id)]) {
+      final c = game.card(id);
+      if (c == null || c.isLand) continue;
+      counts[c.manaValue] = (counts[c.manaValue] ?? 0) + 1;
+    }
+    var best = 2, bestN = -1;
+    for (final e in counts.entries) {
+      if (e.key >= min && e.key <= max && (e.value > bestN || (e.value == bestN && e.key < best))) {
+        best = e.key;
+        bestN = e.value;
+      }
+    }
+    return best.clamp(min, max);
+  }
+
+  /// The color of mana the hand needs most.
+  static ManaColor preferredColor(Game game, PlayerID p) {
+    final land = preferredBasicLand(game, p);
+    return ManaColor.values.firstWhere((c) => c.basicLandType == land, orElse: () => ManaColor.white);
+  }
+
+  /// Peace in Our Time: take the card when there's no worthwhile attack anyway.
+  static bool acceptsPeace(Game game, PlayerID p) => chooseAttackers(game, p).isEmpty;
 
   static Target? targetOf(Effect e) {
     switch (e) {

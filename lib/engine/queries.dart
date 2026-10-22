@@ -36,7 +36,10 @@ class TargetRequirement {
 }
 
 extension GameQueries on Game {
-  Card? cardOf(GameObject o) => o.cardID.isEmpty ? null : db[o.cardID];
+  Card? cardOf(GameObject o) {
+    final id = o.copiedCardID ?? o.cardID;
+    return id.isEmpty ? null : db[id];
+  }
   Card? card(ObjectID id) {
     final o = state.objects[id];
     return o == null ? null : cardOf(o);
@@ -44,7 +47,9 @@ extension GameQueries on Game {
 
   ParsedCard? parsedOf(GameObject o) {
     final c = cardOf(o);
-    return c == null ? null : db.parsed(c);
+    if (c != null) return db.parsed(c);
+    final t = o.token;
+    return t == null ? null : db.parsedToken(t);
   }
 
   String name(ObjectID id) {
@@ -68,11 +73,11 @@ extension GameQueries on Game {
         name: t.name,
         power: t.power,
         toughness: t.toughness,
-        keywords: Set.of(t.keywords),
+        keywords: {...t.keywords, ...db.parsedToken(t).keywords},
         isCreature: t.isCreature,
         isArtifact: t.isArtifact,
         isEnchantment: false,
-        isLand: false,
+        isLand: t.isLand,
         isSpacecraft: false,
         subtypes: Set.of(t.subtypes),
       );
@@ -90,14 +95,17 @@ extension GameQueries on Game {
         subtypes: Set.of(card.subtypes),
       );
       if (t != null) c.keywords.addAll(t.keywords);
+      if (o.basePowerOverride != null) c.power = o.basePowerOverride!;
+      if (o.baseToughnessOverride != null) c.toughness = o.baseToughnessOverride!;
       if (card.isSpacecraft) {
-        final threshold = parsedCard.stationThreshold ?? card.stationThreshold;
-        if (threshold != null && o.chargeCounters >= threshold) {
-          c.isCreature = true;
-          c.keywords.addAll(parsedCard.stationKeywords);
+        // It becomes an artifact creature at its last station line, if it has power and toughness.
+        final threshold = card.power == null ? null : (parsedCard.stationThreshold ?? card.stationThreshold);
+        if (threshold != null && o.chargeCounters >= threshold) c.isCreature = true;
+        for (final line in parsedCard.stationLines) {
+          if (o.chargeCounters >= line.threshold) c.keywords.addAll(line.keywords);
         }
       }
-      for (final s in parsedCard.statics) {
+      for (final s in staticsOf(o)) {
         switch (s) {
           case PowerEquals pe:
             final n = amount(pe.amount, o.controller, id, EffectContext());
@@ -126,7 +134,7 @@ extension GameQueries on Game {
     final counterDelta = o.plusOneCounters - (o.counters[CounterKind.minusOne] ?? 0);
     c.power += counterDelta;
     c.toughness += counterDelta;
-    for (final e in o.untilEndOfTurn) {
+    for (final e in [...o.untilEndOfTurn, for (final l in o.lasting) l.effect]) {
       switch (e) {
         case PumpEffect p:
           c.power += p.power;
@@ -135,6 +143,9 @@ extension GameQueries on Game {
           c.keywords.add(k.keyword);
         case CantBlockEffect _:
           c.keywords.add(Keyword.cantBlock);
+        case TypeEffect t:
+          if (t.replace) c.subtypes = {t.subtype};
+          c.subtypes.add(t.subtype);
       }
     }
     for (final other in state.allPermanents) {
@@ -156,9 +167,7 @@ extension GameQueries on Game {
       }
     }
     for (final other in state.allPermanents) {
-      final p = parsedOf(other);
-      if (p == null) continue;
-      for (final s in p.statics) {
+      for (final s in staticsOf(other)) {
         switch (s) {
           case Anthem a:
             if (matches(a.filter, id, other.controller, other.id, base: c)) {
@@ -248,6 +257,11 @@ extension GameQueries on Game {
     if (f.maxPower != null && c.power > f.maxPower!) return false;
     if (f.minPower != null && c.power < f.minPower!) return false;
     if (f.maxManaValue != null && (cardOf(o)?.manaValue ?? 0) > f.maxManaValue!) return false;
+    if (f.minManaValue != null && (cardOf(o)?.manaValue ?? 0) < f.minManaValue!) return false;
+    if (f.legendary && !isLegendary(o)) return false;
+    if (f.nonBorg && c.subtypes.contains('Borg')) return false;
+    if (f.enteredThisTurn && o.enteredTurn != state.turn) return false;
+    if (f.historic && !(c.isArtifact || isLegendary(o) || (cardOf(o)?.isSaga ?? false))) return false;
     return true;
   }
 
@@ -312,7 +326,18 @@ extension GameQueries on Game {
   }
 
   bool shallowIsArtifact(GameObject o) => o.assimilated || (cardOf(o)?.isArtifact ?? o.token?.isArtifact ?? false);
-  bool shallowIsLand(GameObject o) => cardOf(o)?.isLand ?? false;
+  bool shallowIsLand(GameObject o) => cardOf(o)?.isLand ?? o.token?.isLand ?? false;
+
+  /// Creature types from the card alone (assimilated creatures are Borg).
+  Set<String> shallowSubtypes(GameObject o) {
+    if (o.assimilated) return {'Borg'};
+    final c = cardOf(o);
+    return {...?c?.subtypes, ...?o.token?.subtypes}..remove('Spacecraft');
+  }
+
+  /// Legendary right now: printed legendary (or a legendary token), unless it is a copy "except
+  /// it isn't legendary".
+  bool isLegendary(GameObject o) => !o.nonLegendary && (cardOf(o)?.isLegendary ?? o.token?.isLegendary ?? false);
 
   int amount(Amount a, PlayerID controller, ObjectID? source, EffectContext context) {
     switch (a.kind) {
@@ -330,6 +355,45 @@ extension GameQueries on Game {
         return state.permanentsOf(controller).where(shallowIsLand).map((o) => name(o.id)).toSet().length;
       case AmountKind.thisPower:
         return source == null ? 0 : characteristics(source).power;
+      case AmountKind.artifactCreaturesYouControl:
+        return state.permanentsOf(controller).where((o) => shallowIsCreature(o) && shallowIsArtifact(o)).length;
+      case AmountKind.creatureTypesNonBorg:
+        final types = <String>{};
+        for (final o in state.permanentsOf(controller)) {
+          if (!shallowIsCreature(o)) continue;
+          final sub = shallowSubtypes(o);
+          if (sub.contains('Borg')) continue;
+          types.addAll(sub);
+        }
+        return types.length;
+      case AmountKind.x:
+        return context.x;
+      case AmountKind.twiceX:
+        return context.x * 2;
+      case AmountKind.eventAmount:
+        return context.eventAmount;
+      case AmountKind.artifactOrCreatureCardsInGraveyard:
+        return state.players[controller].graveyard.where((id) {
+          final c = card(id);
+          return c != null && (c.isArtifact || c.isCreature);
+        }).length;
+      case AmountKind.dilemmasThisTurn:
+        return state.players[controller].dilemmasThisTurn;
+      case AmountKind.opponentsAttacked:
+        return state.players[controller].opponentsAttackedThisTurn;
+      case AmountKind.subtypeYouControl:
+        return state.permanentsOf(controller).where((o) => shallowSubtypes(o).contains(a.subtype)).length;
+      case AmountKind.countedThisWay:
+        return context.counted;
+      case AmountKind.otherCreaturesWithCommunicator:
+        final hosts = <ObjectID>{};
+        for (final o in state.permanentsOf(controller)) {
+          final host = o.attachedTo;
+          if (host != null && host != source && (cardOf(o)?.subtypes.contains('Communicator') ?? false)) hosts.add(host);
+        }
+        final equipped = source == null ? null : state.objects[source]?.attachedTo;
+        hosts.remove(equipped);
+        return hosts.length;
     }
   }
 
@@ -341,7 +405,43 @@ extension GameQueries on Game {
     final o = state.objects[id];
     if (o == null || o.zone != Zone.battlefield || o.tapped) return false;
     final c = characteristics(id);
+    if (state.players[o.controller].cantAttackThisTurn) return false;
     return c.isCreature && !c.has(KeywordKind.defender) && !c.cantAttackOrBlock && !hasSummoningSickness(o);
+  }
+
+  /// Whether `p` may play this card from where it is: their hand; exile when an effect let them
+  /// (or the card can be cast from exile); the top of their library (Captain Pike, Benjamin
+  /// Sisko); their graveyard once a turn (The Holodeck).
+  bool playableFromZone(GameObject o, PlayerID p) {
+    final c = cardOf(o);
+    if (c == null) return false;
+    switch (o.zone) {
+      case Zone.hand:
+        return o.owner == p;
+      case Zone.exile:
+        if (o.playableBy == p && state.turn <= o.playableUntilTurn) return true;
+        if (o.owner == p && o.qCopyable && state.activePlayer == p && state.players[p].hand.isNotEmpty) return true;
+        return o.owner == p && db.parsed(c).statics.contains(const SimpleStatic(SimpleStaticKind.castSelfFromExile));
+      case Zone.library:
+        if (o.owner != p || state.players[p].library.firstOrNull != o.id) return false;
+        if (c.isLand && (controlsStatic(p, SimpleStaticKind.playLandsFromTop) || controlsStatic(p, SimpleStaticKind.playLandsAndCreaturesFromTop))) return true;
+        return c.isCreature && controlsStatic(p, SimpleStaticKind.playLandsAndCreaturesFromTop);
+      case Zone.graveyard:
+        return o.owner == p && c.isPermanent && state.activePlayer == p && !state.players[p].usedGraveyardPlayThisTurn && controlsStatic(p, SimpleStaticKind.playPermanentFromGraveyardOncePerTurn);
+      default:
+        return false;
+    }
+  }
+
+  /// Cards outside the hand that `p` may play right now (shown on the table so they can be tapped).
+  List<ObjectID> extraPlayables(PlayerID p) {
+    final out = <ObjectID>[];
+    final top = state.players[p].library.firstOrNull;
+    for (final id in [...state.players[p].exile, ...state.players[p].graveyard, ...state.players[state.opponentOf(p)].exile, ?top]) {
+      final o = state.objects[id];
+      if (o != null && playableFromZone(o, p) && (canCast(id, p) || canPlayLand(id, p))) out.add(id);
+    }
+    return out;
   }
 
   bool canBlock(ObjectID blocker, ObjectID attacker) {
@@ -351,23 +451,40 @@ extension GameQueries on Game {
     if (!bc.isCreature || bc.has(KeywordKind.cantBlock) || bc.cantAttackOrBlock) return false;
     if (ac.has(KeywordKind.unblockable)) return false;
     if (ac.has(KeywordKind.flying) && !bc.has(KeywordKind.flying) && !bc.has(KeywordKind.reach)) return false;
+    for (final k in ac.keywords) {
+      if (k.kind == KeywordKind.evadesSmall && bc.power <= k.value) return false;
+    }
     return true;
   }
 
   /// Untapped sources of mana: (object, colors it can make; empty = colorless, usesSacrifice).
-  List<(ObjectID, List<ManaColor>, bool)> manaSources(PlayerID p) {
+  /// Mana in a player's pool, as pseudo sources: object id `poolID(p, i)`.
+  static ObjectID poolID(PlayerID p, int i) => -1000 - p * 100 - i;
+
+  List<(ObjectID, List<ManaColor>, bool)> manaSources(PlayerID p, {Card? forSpell}) {
     final out = <(ObjectID, List<ManaColor>, bool)>[];
+    var i = 0;
+    final pool = state.players[p].manaPool;
+    for (final key in (pool.keys.toList()..sort())) {
+      for (var n = 0; n < pool[key]!; n++) {
+        final c = ManaColor.fromSymbol(key);
+        out.add((GameQueries.poolID(p, i++), c == null ? <ManaColor>[] : [c], false));
+      }
+    }
+    final noTreasureSacrifice = controlsStatic(p, SimpleStaticKind.cantSacrificeTreasures);
     for (final o in state.permanentsOf(p)) {
       if (o.tapped) continue;
       final parsed = parsedOf(o);
       if (parsed == null) continue;
-      if (parsed.hasManaAbility) {
+      final manaAbilities = parsed.abilities.whereType<ManaAbility>().where((m) => !m.artifactSpellsOnly || (forSpell?.isArtifact ?? false)).toList();
+      if (manaAbilities.isNotEmpty) {
         if (characteristics(o.id).isCreature && hasSummoningSickness(o)) continue;
-        out.add((o.id, parsed.manaColors, false));
+        out.add((o.id, manaAbilities.expand((m) => m.colors).toSet().toList(), false));
         continue;
       }
       for (final a in parsed.abilities) {
         if (a is Activated && a.cost.tap && a.effects.length == 1 && a.effects[0] is AddMana && a.cost.mana.isFree && a.cost.payLife == 0) {
+          if (a.cost.sacrificeSelf && noTreasureSacrifice && (o.token?.subtypes.contains('Treasure') ?? false)) continue;
           out.add((o.id, (a.effects[0] as AddMana).colors, a.cost.sacrificeSelf));
         }
       }
@@ -377,8 +494,8 @@ extension GameQueries on Game {
 
   /// Which sources to tap to pay a cost, or null if it can't be paid. Colored needs first, from
   /// the pickiest sources; Treasures last.
-  List<ObjectID>? manaPlan(ManaCost cost, PlayerID player) {
-    final sources = manaSources(player);
+  List<ObjectID>? manaPlan(ManaCost cost, PlayerID player, {Card? forSpell}) {
+    final sources = manaSources(player, forSpell: forSpell);
     sources.sort((a, b) {
       if (a.$3 != b.$3) return a.$3 ? 1 : -1;
       return a.$2.length - b.$2.length;
@@ -425,9 +542,11 @@ extension GameQueries on Game {
     if (state.pending != null || state.winner != null) return false;
     final o = state.objects[id];
     final card = o == null ? null : cardOf(o);
-    if (o == null || o.zone != Zone.hand || o.owner != p || card == null || card.isLand) return false;
+    if (o == null || card == null || card.isLand || !playableFromZone(o, p)) return false;
     if (!_timingAllows(card, p)) return false;
-    if (!canPay(card.cost, p)) return false;
+    final cost = card.cost..generic += o.extraCost;
+    reduceCost(cost, card, p, const []);
+    if (manaPlan(cost, p, forSpell: card) == null) return false;
     if (db.parsed(card).isAura && legalTargets(Filter.creature, p, id).isEmpty) return false;
     return true;
   }
@@ -466,7 +585,7 @@ extension GameQueries on Game {
     if (state.pending != null || state.winner != null || state.priority != null || state.stack.isNotEmpty || state.activePlayer != p || !state.phase.isMain) return false;
     final o = state.objects[id];
     final card = o == null ? null : cardOf(o);
-    if (o == null || o.zone != Zone.hand || card == null || !card.isLand) return false;
+    if (o == null || card == null || !card.isLand || !playableFromZone(o, p)) return false;
     return state.players[p].landsPlayedThisTurn < landsAllowed(p);
   }
 
