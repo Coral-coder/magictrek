@@ -1,4 +1,5 @@
 import 'props.dart';
+import 'rules.dart';
 import 'state.dart';
 
 /// Everything a player can do. Actions are the unit of replay and of lockstep sync: a game is
@@ -11,7 +12,7 @@ sealed class GameAction with Props {
   static GameAction fromJson(Map<String, dynamic> j) {
     switch (j['t'] as String) {
       case 'start':
-        return StartAction((j['decks'] as List).map((d) => (d as List).cast<String>()).toList());
+        return StartAction((j['decks'] as List).map((d) => (d as List).cast<String>()).toList(), rules: Rules.fromJson(j['rules'] as Map<String, dynamic>?));
       case 'respond':
         return RespondAction(DecisionResponse.fromJson(j['r'] as Map<String, dynamic>));
       case 'land':
@@ -42,12 +43,13 @@ sealed class GameAction with Props {
 }
 
 class StartAction extends GameAction {
-  const StartAction(this.decks); // card ids per player, in seat order
+  const StartAction(this.decks, {this.rules = Rules.standard}); // card ids per player, in seat order
   final List<List<String>> decks;
+  final Rules rules;
   @override
-  List<Object?> get props => [decks];
+  List<Object?> get props => [decks, rules];
   @override
-  Map<String, dynamic> toJson() => {'t': 'start', 'decks': decks};
+  Map<String, dynamic> toJson() => {'t': 'start', 'decks': decks, if (!rules.isStandard) 'rules': rules.toJson()};
 }
 
 class RespondAction extends GameAction {

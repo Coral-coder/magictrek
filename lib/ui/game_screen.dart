@@ -775,9 +775,10 @@ class _GameScreenState extends State<GameScreen> {
         return const SizedBox.shrink();
       case PickingCards p:
         final decision = state.pending?.decision;
-        final need = decision is DiscardToHandSizeDecision ? decision.count : 0;
+        final need = switch (decision) { DiscardToHandSizeDecision d => d.count, ChooseBottomDecision d => d.count, _ => 0 };
+        final verb = decision is ChooseBottomDecision ? 'To the bottom' : 'Discard';
         return Row(children: [
-          Expanded(child: Text('Discard: ${p.chosen.length}/$need chosen (tap cards in hand)', style: LCARS.font(12, color: LCARS.gold))),
+          Expanded(child: Text('$verb: ${p.chosen.length}/$need chosen (tap cards in hand)', style: LCARS.font(12, color: LCARS.gold))),
           _small('Done', p.chosen.length == need
               ? () {
                   perform(RespondAction(CardsResponse(p.chosen)));
@@ -830,7 +831,7 @@ class _GameScreenState extends State<GameScreen> {
       case MulliganDecision _:
         final taken = state.players[pending.player].mulligans;
         return Row(children: [
-          Expanded(child: Text(taken == 0 ? 'Keep this hand?' : 'Keep this hand of ${7 - taken}?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+          Expanded(child: Text(taken == 0 ? 'Keep this hand?' : 'Keep this hand of ${state.players[pending.player].hand.length}?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
           _small('Keep', () => perform(const RespondAction(KeepResponse())), color: LCARS.green, width: 76),
           const SizedBox(width: 4),
           _small('Mulligan', () => perform(const RespondAction(MulliganResponse())), color: LCARS.red, fill: false, width: 124),
@@ -854,6 +855,8 @@ class _GameScreenState extends State<GameScreen> {
         ]);
       case DiscardToHandSizeDecision c:
         return Row(children: [Expanded(child: Text('Discard ${c.count} card${c.count == 1 ? '' : 's'}', style: LCARS.font(12, color: LCARS.gold))), _small('Choose', () => setState(() => interaction = const PickingCards([])), color: LCARS.gold, width: 80)]);
+      case ChooseBottomDecision c:
+        return Row(children: [Expanded(child: Text('Mulligan: put ${c.count} card${c.count == 1 ? '' : 's'} on the bottom', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)), _small('Choose', () => setState(() => interaction = const PickingCards([])), color: LCARS.gold, width: 80)]);
       case ChooseSacrificeDecision c:
         return Row(children: [Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)), _small('Choose', () => setState(() => interaction = const DecisionTargets([])), color: LCARS.gold, width: 80)]);
       case SurveilDecision _:
@@ -967,7 +970,7 @@ class EventText {
     String p(PlayerID? id) => id == null ? '?' : game.state.players[id].name;
     switch (e.kind) {
       case 'gameStarted':
-        return 'Game on. ${p(e.player)} goes first.';
+        return 'Game on. ${p(e.player)} goes first. Rules: ${game.rules.summary}.';
       case 'turnBegan':
         return '— Turn ${e.amount}: ${p(e.player)} —';
       case 'drew':

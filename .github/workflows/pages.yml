@@ -1,0 +1,46 @@
+# Publishes the landing page in site/ to GitHub Pages (https://coral-coder.github.io/magictrek/)
+# with a few card scans and the app icon copied in from the repo. Runs when the site or the
+# workflow changes on main or the feature branch, or by hand. The first run enables Pages for
+# the repository (source: GitHub Actions) when it can; if that is refused, enable it once under
+# Settings → Pages → Source → GitHub Actions and run the workflow again.
+name: Website
+
+on:
+  push:
+    branches: [main, startrek-game]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/img
+          cp site/* _site/
+          for f in trk-7 trk-142 trk-74 trc-1 trk-80 trk-273 trk-69 trc-199; do cp "assets/images/$f.jpg" _site/img/; done
+          cp assets/icon.png _site/img/icon.png
+          ls -la _site _site/img
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+          token: ${{ secrets.SECRETS_TOKEN || github.token }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

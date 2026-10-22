@@ -2,6 +2,7 @@ import 'abilities.dart';
 import 'actions.dart';
 import 'bot.dart';
 import 'cards.dart';
+import 'rules.dart';
 import 'state.dart';
 
 part 'queries.dart';
@@ -16,8 +17,7 @@ class Game {
   final GameState state;
   final CardDatabase db;
 
-  static const startingLife = 20;
-  static const handSize = 7;
+  Rules get rules => state.rules;
 
   // MARK: - Applying actions
 
@@ -25,6 +25,7 @@ class Game {
     if (state.isOver) throw GameError('The game is over');
     switch (action) {
       case StartAction a:
+        state.rules = a.rules;
         _start(a.decks);
       case RespondAction a:
         _respond(a.response);
@@ -89,14 +90,14 @@ class Game {
         state.players[p].library.add(id);
       }
       state.rng.shuffle(state.players[p].library);
-      state.players[p].life = startingLife;
+      state.players[p].life = rules.startingLife;
     }
     state.started = true;
     state.startingPlayer = state.rng.nextInt(state.players.length);
     state.activePlayer = state.startingPlayer;
     log(GameEvent('gameStarted', player: state.startingPlayer));
     for (final p in state.players) {
-      _draw(p.id, handSize);
+      _draw(p.id, rules.handSize);
     }
     state.turn = 0;
     _askMulligan(state.startingPlayer);
@@ -262,7 +263,7 @@ class Game {
   void _drawStep(bool first) {
     state.phase = Phase.draw;
     log(GameEvent('phase', phase: Phase.draw));
-    if (!(first && state.players.length == 2)) _draw(state.activePlayer, 1);
+    if (!(first && state.players.length == 2 && !rules.firstPlayerDraws)) _draw(state.activePlayer, 1);
     for (final o in state.permanentsOf(state.activePlayer)) {
       if (cardOf(o)?.isSaga == true) _advanceSaga(o.id);
     }
@@ -351,8 +352,8 @@ class Game {
     final p = state.activePlayer;
     final ps = state.players[p];
     final noMax = ps.noMaxHandSizeUntilNextTurn || state.permanentsOf(p).any((o) => parsedOf(o)?.statics.contains(SimpleStatic.noMaxHandSize) == true);
-    if (!noMax && ps.hand.length > handSize) {
-      state.pending = PendingDecision(player: p, decision: DiscardToHandSizeDecision(ps.hand.length - handSize), resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.cleanup));
+    if (!noMax && rules.maxHandSize && ps.hand.length > rules.handSize) {
+      state.pending = PendingDecision(player: p, decision: DiscardToHandSizeDecision(ps.hand.length - rules.handSize), resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.cleanup));
       state.turnContinuation.add(TurnStep.nextTurn);
       return;
     }
@@ -829,9 +830,34 @@ class Game {
             move(id, Zone.library);
           }
           state.rng.shuffle(ps.library);
-          final n = (handSize - ps.mulligans).clamp(1, handSize);
-          _draw(p, n);
-          log(GameEvent('mulliganed', player: p, amount: n));
+          // The cost of the mulligans taken so far, in cards.
+          final cost = (ps.mulligans - (rules.freeMulligan ? 1 : 0)).clamp(0, rules.handSize - 1);
+          if (rules.londonMulligan) {
+            // Draw a full hand, then choose which cards go to the bottom.
+            _draw(p, rules.handSize);
+            log(GameEvent('mulliganed', player: p, amount: rules.handSize - cost));
+            if (cost > 0) {
+              state.pending = PendingDecision(player: p, decision: ChooseBottomDecision(cost), resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.mulligan));
+            } else {
+              _askMulligan(p);
+            }
+          } else {
+            final n = rules.handSize - cost;
+            _draw(p, n);
+            log(GameEvent('mulliganed', player: p, amount: n));
+            _askMulligan(p);
+          }
+          return;
+        }
+      case ChooseBottomDecision d:
+        if (r is CardsResponse) {
+          final p = pending.player;
+          final ps = state.players[p];
+          final chosen = r.ids.where((id) => ps.hand.contains(id)).toSet().toList();
+          if (chosen.length != d.count) throw GameError('Choose ${d.count} card${d.count == 1 ? '' : 's'} to put on the bottom');
+          for (final id in chosen) {
+            move(id, Zone.library, toBottom: true);
+          }
           _askMulligan(p);
           return;
         }

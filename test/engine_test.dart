@@ -8,6 +8,7 @@ import 'package:magictrek/engine/cards.dart';
 import 'package:magictrek/engine/decks.dart';
 import 'package:magictrek/engine/game.dart';
 import 'package:magictrek/engine/rng.dart';
+import 'package:magictrek/engine/rules.dart';
 import 'package:magictrek/engine/state.dart';
 
 late CardDatabase db;
@@ -125,6 +126,72 @@ void main() {
       }
       playBotGame(seed, [deck(pick), deck(pick.skip(40))], maxActions: 1500);
     }
+  });
+
+  group('rule options', () {
+    Game start(Rules rules) {
+      final game = Game(playerNames: const ['A', 'B'], bots: const [false, false], seed: 7, db: db);
+      final plains = db.byName('Plains')!.id;
+      final shock = db.byName('Burst Lightning')?.id ?? plains;
+      final deck = [for (var i = 0; i < 40; i++) i.isEven ? plains : shock];
+      game.apply(StartAction([deck, deck], rules: rules));
+      return game;
+    }
+
+    test('London mulligan redraws a full hand and bottoms one card per mulligan', () {
+      final game = start(const Rules());
+      final p = game.state.startingPlayer;
+      expect(game.state.pending?.decision, isA<MulliganDecision>());
+      game.apply(const RespondAction(MulliganResponse()));
+      expect(game.state.players[p].hand.length, 7);
+      expect(game.state.pending?.decision, isA<ChooseBottomDecision>());
+      final bottom = game.state.players[p].hand.first;
+      game.apply(RespondAction(CardsResponse([bottom])));
+      expect(game.state.players[p].hand.length, 6);
+      expect(game.state.players[p].library.last, bottom);
+      expect(game.state.pending?.decision, isA<MulliganDecision>());
+      game.apply(const RespondAction(MulliganResponse()));
+      expect((game.state.pending!.decision as ChooseBottomDecision).count, 2);
+    });
+
+    test('classic mulligan draws one card fewer; the free mulligan costs nothing', () {
+      final classic = start(const Rules(londonMulligan: false));
+      classic.apply(const RespondAction(MulliganResponse()));
+      expect(classic.state.players[classic.state.startingPlayer].hand.length, 6);
+      expect(classic.state.pending?.decision, isA<MulliganDecision>());
+
+      final free = start(const Rules(freeMulligan: true));
+      free.apply(const RespondAction(MulliganResponse()));
+      expect(free.state.players[free.state.startingPlayer].hand.length, 7);
+      expect(free.state.pending?.decision, isA<MulliganDecision>());
+      free.apply(const RespondAction(MulliganResponse()));
+      expect(free.state.pending?.decision, isA<ChooseBottomDecision>());
+    });
+
+    test('starting life, hand size and the first draw follow the rules', () {
+      final game = start(const Rules(startingLife: 30, handSize: 5, firstPlayerDraws: true));
+      final p = game.state.startingPlayer;
+      expect(game.state.players.every((ps) => ps.life == 30), isTrue);
+      expect(game.state.players[p].hand.length, 5);
+      game.apply(const RespondAction(KeepResponse()));
+      game.apply(const RespondAction(KeepResponse()));
+      expect(game.state.players[p].hand.length, 6, reason: 'the first player drew on turn one');
+
+      final normal = start(const Rules());
+      final q = normal.state.startingPlayer;
+      normal.apply(const RespondAction(KeepResponse()));
+      normal.apply(const RespondAction(KeepResponse()));
+      expect(normal.state.players[q].hand.length, 7, reason: 'no draw on the first turn');
+    });
+
+    test('rules travel in the start action and the digest', () {
+      const rules = Rules(startingLife: 40, londonMulligan: false, maxHandSize: false);
+      final action = StartAction(const [[], []], rules: rules);
+      final back = GameAction.fromJson(action.toJson()) as StartAction;
+      expect(back.rules, rules);
+      expect(GameAction.fromJson(const StartAction([[], []]).toJson()), const StartAction([[], []]));
+      expect(start(rules).state.digest(), isNot(start(const Rules()).state.digest()));
+    });
   });
 
   group('rules', () {

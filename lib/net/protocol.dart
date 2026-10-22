@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import '../engine/actions.dart';
 import '../engine/cards.dart';
 import '../engine/game.dart';
+import '../engine/rules.dart';
 import 'transport.dart';
 
 /// Wire format version; peers with different versions refuse to play (lockstep needs identical rules).
@@ -16,7 +17,7 @@ const protocolVersion = 1;
 ///
 /// Messages (JSON): hello, start, action, need (ask for actions from a seq), state (digest check).
 class LockstepMatch {
-  LockstepMatch({required this.transport, required this.db, required this.localName, required this.localId, required this.localDeck, required this.isHost, int? seed, this.engineVersion = 1})
+  LockstepMatch({required this.transport, required this.db, required this.localName, required this.localId, required this.localDeck, required this.isHost, int? seed, this.engineVersion = 1, this.rules = Rules.standard})
       : _seed = seed ?? DateTime.now().microsecondsSinceEpoch & 0x7FFFFFFFFFFF {
     _sub = transport.messages.listen(_onMessage, onError: (_) {});
     _stateSub = transport.stateChanges.listen((s) {
@@ -32,6 +33,9 @@ class LockstepMatch {
   final bool isHost;
   final int engineVersion;
   final int _seed;
+
+  /// The host's rules; a guest takes them from the start message.
+  Rules rules;
 
   String? remoteName, remoteId;
   List<String>? remoteDeck;
@@ -118,6 +122,7 @@ class LockstepMatch {
         final seed = m['seed'] as int;
         final names = (m['names'] as List).cast<String>();
         final decks = (m['decks'] as List).map((d) => (d as List).cast<String>()).toList();
+        rules = Rules.fromJson(m['rules'] as Map<String, dynamic>?);
         _startGame(seed, names, decks);
         _send({'t': 'need', 'from': actions.length});
       case 'action':
@@ -139,13 +144,13 @@ class LockstepMatch {
     final deck = remoteDeck;
     if (deck == null) return;
     game ??= _buildGame(_seed, [localName, remoteName!], [localDeck, deck]);
-    _send({'t': 'start', 'seed': _seed, 'names': [localName, remoteName], 'decks': [localDeck, deck]});
+    _send({'t': 'start', 'seed': _seed, 'names': [localName, remoteName], 'decks': [localDeck, deck], 'rules': rules.toJson()});
   }
 
   Game _buildGame(int seed, List<String> names, List<List<String>> decks) {
     final g = Game(playerNames: names, seed: seed, db: db);
     if (actions.isEmpty) {
-      final start = StartAction(decks);
+      final start = StartAction(decks, rules: rules);
       g.apply(start);
       actions.add(start);
       digests.add(_digest(g));

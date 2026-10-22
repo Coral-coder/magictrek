@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app/store.dart';
 import '../app/updater.dart';
+import '../engine/rules.dart';
 import 'lcars.dart';
 import 'update.dart';
 
@@ -124,6 +125,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const LcarsHeader('Console', color: LCARS.lavender),
           SwitchListTile(title: Text('Console sounds', style: LCARS.body), value: store.soundOn, activeThumbColor: LCARS.orange, onChanged: store.setSound, contentPadding: EdgeInsets.zero),
           SwitchListTile(title: Text('Haptics', style: LCARS.body), value: store.hapticsOn, activeThumbColor: LCARS.orange, onChanged: store.setHaptics, contentPadding: EdgeInsets.zero),
+          const LcarsHeader('Rules', color: LCARS.butterscotch),
+          Text('How new games are played. The host\'s rules apply to a linked match; a saved game keeps the rules it started with.', style: LCARS.label),
+          const SizedBox(height: 6),
+          _RuleChoice(label: 'Starting life', value: store.rules.startingLife, options: const [20, 25, 30, 40], onChanged: (v) => store.setRules(store.rules.copyWith(startingLife: v))),
+          _RuleChoice(label: 'Opening hand', value: store.rules.handSize, options: const [5, 6, 7, 8], onChanged: (v) => store.setRules(store.rules.copyWith(handSize: v))),
+          _RuleSwitch('London mulligan', 'Redraw a full hand, then put one card per mulligan on the bottom. Off: each mulligan draws one card fewer.', store.rules.londonMulligan, (v) => store.setRules(store.rules.copyWith(londonMulligan: v))),
+          _RuleSwitch('First mulligan is free', 'The Commander convention.', store.rules.freeMulligan, (v) => store.setRules(store.rules.copyWith(freeMulligan: v))),
+          _RuleSwitch('First player draws on turn one', 'Normally the player going first skips that draw.', store.rules.firstPlayerDraws, (v) => store.setRules(store.rules.copyWith(firstPlayerDraws: v))),
+          _RuleSwitch('Maximum hand size', 'Discard down to the opening-hand size at end of turn.', store.rules.maxHandSize, (v) => store.setRules(store.rules.copyWith(maxHandSize: v))),
+          if (!store.rules.isStandard) ...[
+            const SizedBox(height: 4),
+            LcarsButton('Standard rules', color: LCARS.butterscotch, fill: false, height: 32, expand: false, onPressed: () => store.setRules(Rules.standard)),
+          ],
           const LcarsHeader('Relays', color: LCARS.blue),
           Text('Remote play sends moves through these public Nostr relays, one per line. Any relay works, including your own.', style: LCARS.label),
           const SizedBox(height: 4),
@@ -168,4 +182,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+
+class _RuleSwitch extends StatelessWidget {
+  const _RuleSwitch(this.title, this.subtitle, this.value, this.onChanged);
+  final String title, subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+        title: Text(title, style: LCARS.body),
+        subtitle: Text(subtitle, style: LCARS.small.copyWith(color: LCARS.gray)),
+        value: value,
+        activeThumbColor: LCARS.butterscotch,
+        onChanged: onChanged,
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+      );
+}
+
+class _RuleChoice extends StatelessWidget {
+  const _RuleChoice({required this.label, required this.value, required this.options, required this.onChanged});
+  final String label;
+  final int value;
+  final List<int> options;
+  final ValueChanged<int> onChanged;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          Expanded(child: Text(label, style: LCARS.body)),
+          for (final o in options) ...[
+            SizedBox(width: 46, child: LcarsButton('$o', height: 28, color: LCARS.butterscotch, fill: o == value, onPressed: () => onChanged(o))),
+            const SizedBox(width: 4),
+          ],
+        ]),
+      );
 }

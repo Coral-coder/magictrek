@@ -7,6 +7,7 @@ import '../engine/actions.dart';
 import '../engine/bot.dart';
 import '../engine/cards.dart';
 import '../engine/game.dart';
+import '../engine/rules.dart';
 import '../engine/state.dart';
 import '../net/protocol.dart';
 import 'notifications.dart';
@@ -17,7 +18,7 @@ enum SessionMode { solo, hotseat, linked }
 /// One game being played on this device: drives the engine, runs the computer player, keeps the
 /// action log for saving, or defers to a LockstepMatch when the opponent is on another device.
 class GameSession extends ChangeNotifier {
-  GameSession.local({required this.mode, required List<String> playerNames, required this.seed, required this.decks, required this.db})
+  GameSession.local({required this.mode, required List<String> playerNames, required this.seed, required this.decks, required this.db, this.rules = Rules.standard})
       : playerNames = List.of(playerNames),
         match = null,
         game = Game(playerNames: playerNames, bots: mode == SessionMode.solo ? const [false, true] : const [false, false], seed: seed, db: db) {
@@ -28,6 +29,7 @@ class GameSession extends ChangeNotifier {
   GameSession.linked({required LockstepMatch match, required this.db})
       : mode = SessionMode.linked,
         seed = 0,
+        rules = Rules.standard,
         match = match,
         playerNames = [match.game!.state.players[0].name, match.game!.state.players[1].name],
         decks = const [],
@@ -45,6 +47,9 @@ class GameSession extends ChangeNotifier {
 
   final SessionMode mode;
   final int seed;
+
+  /// The rules a local game starts under (a linked game's are in its start action).
+  final Rules rules;
   final List<String> playerNames;
   final List<List<String>> decks;
   final CardDatabase db;
@@ -69,7 +74,7 @@ class GameSession extends ChangeNotifier {
   PlayerID get opponentSeat => state.opponentOf(localSeat);
   bool get isLinked => mode == SessionMode.linked;
 
-  void start() => perform(StartAction(decks));
+  void start() => perform(StartAction(decks, rules: rules));
 
   /// Resumes a saved local game by replaying its actions.
   void replay(List<GameAction> saved) {

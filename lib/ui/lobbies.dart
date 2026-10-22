@@ -235,7 +235,7 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
     final store = AppStore.shared;
     final d = deck;
     if (d == null) return;
-    final match = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost);
+    final match = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost, rules: store.rules);
     late StreamSubscription sub;
     sub = match.events.listen((e) {
       if (e == 'start' || (e == 'hello' && match.game != null)) {
@@ -379,7 +379,7 @@ class _RemoteLobbyScreenState extends State<RemoteLobbyScreen> {
     transport = t;
     relaySub?.cancel();
     relaySub = t.relayStatus.listen((m) => setState(() => relaysUp = m.values.where((v) => v).length));
-    final m = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost);
+    final m = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost, rules: store.rules);
     match = m;
     setState(() {
       hostedCode = isHost ? code : null;

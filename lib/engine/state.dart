@@ -1,6 +1,7 @@
 import 'abilities.dart';
 import 'props.dart';
 import 'rng.dart';
+import 'rules.dart';
 
 typedef PlayerID = int;
 typedef ObjectID = int;
@@ -117,6 +118,12 @@ sealed class Decision {
 
 class MulliganDecision extends Decision {
   const MulliganDecision();
+}
+
+/// London mulligan: after drawing a full hand, put [count] cards on the bottom of the library.
+class ChooseBottomDecision extends Decision {
+  const ChooseBottomDecision(this.count);
+  final int count;
 }
 
 class DeclareBlockersDecision extends Decision {
@@ -381,6 +388,7 @@ class GameState {
   }
 
   late List<PlayerState> players;
+  Rules rules = Rules.standard;
   final Map<ObjectID, GameObject> objects = {};
   int nextObjectID = 1;
   int turn = 0;
@@ -416,7 +424,7 @@ class GameState {
   /// this after each action are in sync.
   String digest() {
     final b = StringBuffer();
-    b.writeln('turn=$turn active=$activePlayer phase=${phase.name} rng=${rng.state} next=$nextObjectID winner=$winner started=$started actions=$actionCount pending=${pending?.decision.runtimeType}');
+    b.writeln('turn=$turn active=$activePlayer phase=${phase.name} rng=${rng.state} next=$nextObjectID winner=$winner started=$started actions=$actionCount pending=${pending?.decision.runtimeType} rules=${rules.digest()}');
     for (final p in players) {
       b.writeln(p.digest());
     }

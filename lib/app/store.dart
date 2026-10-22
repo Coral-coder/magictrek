@@ -9,6 +9,7 @@ import '../engine/cards.dart';
 import '../engine/decks.dart';
 import '../net/protocol.dart';
 import '../net/relay.dart';
+import '../engine/rules.dart';
 import 'notifications.dart';
 import 'session.dart';
 import 'sound.dart';
@@ -26,6 +27,7 @@ class AppStore extends ChangeNotifier {
   GameSession? session;
   String playerName = 'Captain';
   bool soundOn = true, hapticsOn = true, autoUpdate = true;
+  Rules rules = Rules.standard;
   String deviceId = '';
   String relayIdentity = '';
   List<String> relays = List.of(defaultRelays);
@@ -40,6 +42,12 @@ class AppStore extends ChangeNotifier {
     soundOn = _prefs.getBool('soundOn') ?? true;
     hapticsOn = _prefs.getBool('hapticsOn') ?? true;
     autoUpdate = _prefs.getBool('autoUpdate') ?? true;
+    final rulesJson = _prefs.getString('rules');
+    if (rulesJson != null) {
+      try {
+        rules = Rules.fromJson(jsonDecode(rulesJson) as Map<String, dynamic>);
+      } catch (_) {}
+    }
     Updater.shared.autoDownload = autoUpdate;
     deviceId = _prefs.getString('deviceId') ?? '';
     if (deviceId.isEmpty) {
@@ -94,6 +102,12 @@ class AppStore extends ChangeNotifier {
     soundOn = v;
     Console.shared.soundOn = v;
     await _prefs.setBool('soundOn', v);
+    notifyListeners();
+  }
+
+  Future<void> setRules(Rules r) async {
+    rules = r;
+    await _prefs.setString('rules', jsonEncode(r.toJson()));
     notifyListeners();
   }
 
@@ -163,7 +177,7 @@ class AppStore extends ChangeNotifier {
   GameSession startLocalGame({required Deck deck, required Deck opponentDeck, required bool hotseat}) {
     final seed = DateTime.now().microsecondsSinceEpoch & 0x7FFFFFFFFFFF;
     final names = hotseat ? ['Player 1', 'Player 2'] : [playerName, 'Computer'];
-    final s = GameSession.local(mode: hotseat ? SessionMode.hotseat : SessionMode.solo, playerNames: names, seed: seed, decks: [deck.cardList, opponentDeck.cardList], db: db);
+    final s = GameSession.local(mode: hotseat ? SessionMode.hotseat : SessionMode.solo, playerNames: names, seed: seed, decks: [deck.cardList, opponentDeck.cardList], db: db, rules: rules);
     _attach(s);
     s.start();
     return s;

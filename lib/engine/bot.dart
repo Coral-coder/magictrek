@@ -59,6 +59,8 @@ class Bot {
         return const YesResponse();
       case DiscardToHandSizeDecision d:
         return CardsResponse(discardChoice(game, p, d.count));
+      case ChooseBottomDecision d:
+        return CardsResponse(bottomChoice(game, p, d.count));
       case ChooseSacrificeDecision d:
         return SacrificeResponse(sacrificeChoice(game, d.candidates));
       case SurveilDecision d:
@@ -137,6 +139,25 @@ class Bot {
     }
     final sorted = List.of(pool)..sort((a, b) => value(b, game) - value(a, game));
     return sorted.take(count).toList();
+  }
+
+  /// London mulligan: keep three or four lands if possible, bottoming extra lands first and
+  /// then the most expensive spells.
+  static List<ObjectID> bottomChoice(Game game, PlayerID p, int count) {
+    final hand = List.of(game.state.players[p].hand);
+    final lands = hand.where((id) => game.card(id)?.isLand == true).toList();
+    final spells = hand.where((id) => game.card(id)?.isLand != true).toList()..sort((a, b) => (game.card(b)?.manaValue ?? 0).compareTo(game.card(a)?.manaValue ?? 0));
+    final out = <ObjectID>[];
+    while (out.length < count && lands.length > 3) {
+      out.add(lands.removeLast());
+    }
+    while (out.length < count && spells.isNotEmpty) {
+      out.add(spells.removeAt(0));
+    }
+    while (out.length < count && lands.isNotEmpty) {
+      out.add(lands.removeLast());
+    }
+    return out;
   }
 
   static List<ObjectID> discardChoice(Game game, PlayerID p, int count) {

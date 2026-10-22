@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MagicTrek</title>
+<meta name="description" content="MagicTrek: a Magic: The Gathering–style card game built on the Star Trek set, with serverless multiplayer over Wi‑Fi, Bluetooth and subspace relays. Free for Android and iPhone.">
+<meta property="og:title" content="MagicTrek">
+<meta property="og:description" content="Card battles across the final frontier. Android and iPhone, no server, no account.">
+<meta property="og:image" content="img/trk-273.jpg">
+<link rel="icon" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --orange: #FF9900; --peach: #FFCC99; --butter: #FF9966; --lavender: #CC99CC; --violet: #9966CC;
+    --blue: #9999FF; --sky: #6688CC; --ice: #99CCFF; --gold: #FFCC66; --red: #CC6666; --green: #66CC99;
+    --gray: #666688; --panel: #111118; --black: #000;
+    --font: 'Antonio', 'Helvetica Neue', Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--black); color: var(--peach); font-family: var(--font); letter-spacing: .04em; overflow-x: hidden; }
+  a { color: var(--ice); }
+  canvas#stars { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  .frame { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+  /* LCARS top elbow */
+  .elbow { display: grid; grid-template-columns: 110px 1fr; grid-template-rows: 64px 22px; gap: 0 10px; margin-bottom: 14px; }
+  .elbow .corner { grid-row: 1 / span 2; background: var(--orange); border-radius: 44px 0 0 0; position: relative; }
+  .elbow .corner::after { content: ""; position: absolute; right: -10px; bottom: 0; width: 10px; height: 22px; background: var(--orange); }
+  .elbow .bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 8px; }
+  .elbow .bar .pill { height: 22px; min-width: 60px; border-radius: 11px; }
+  .elbow .title { grid-column: 2; display: flex; align-items: center; justify-content: space-between; padding: 0 0 0 4px; }
+  .elbow .title h1 { margin: 0; font-size: clamp(30px, 7vw, 54px); color: var(--orange); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1; }
+  .elbow .title .stardate { font-size: 13px; color: var(--gray); text-transform: uppercase; text-align: right; }
+  .elbow .title .stardate b { color: var(--gold); font-weight: 400; display: block; font-size: 18px; }
+  .elbow .rail { grid-column: 2; background: var(--orange); height: 22px; border-radius: 0 11px 11px 0; display: flex; gap: 6px; justify-content: flex-end; align-items: center; padding-right: 10px; }
+  .elbow .rail span { height: 10px; width: 44px; border-radius: 5px; background: var(--black); opacity: .35; }
+
+  /* left spine + content */
+  .layout { display: grid; grid-template-columns: 110px 1fr; gap: 10px; }
+  .spine { display: flex; flex-direction: column; gap: 6px; }
+  .spine div { border-radius: 4px; min-height: 48px; display: flex; align-items: flex-end; justify-content: flex-end; padding: 4px 8px; font-size: 12px; color: var(--black); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .spine div:nth-child(1){ background: var(--orange); flex: 2; }
+  .spine div:nth-child(2){ background: var(--peach); }
+  .spine div:nth-child(3){ background: var(--lavender); flex: 3; }
+  .spine div:nth-child(4){ background: var(--blue); }
+  .spine div:nth-child(5){ background: var(--gold); flex: 5; }
+  .spine div:nth-child(6){ background: var(--butter); }
+  .spine div:nth-child(7){ background: var(--violet); flex: 2; }
+  .spine div:nth-child(8){ background: var(--green); }
+  main { min-width: 0; }
+
+  section { margin: 0 0 34px; }
+  .head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+  .head::before { content: ""; width: 56px; height: 18px; border-radius: 9px; background: var(--c, var(--orange)); }
+  .head::after { content: ""; flex: 1; height: 18px; border-radius: 9px; background: var(--c, var(--orange)); }
+  .head h2 { margin: 0; font-size: 24px; text-transform: uppercase; color: var(--c, var(--orange)); font-weight: 700; letter-spacing: .08em; }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; align-items: center; }
+  .hero p.lead { font-size: clamp(20px, 3vw, 28px); line-height: 1.25; margin: 0 0 8px; color: var(--peach); }
+  .hero p.sub { color: var(--gray); font-size: 16px; margin: 0 0 20px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; height: 54px; padding: 0 26px; border-radius: 27px; background: var(--c, var(--orange)); color: var(--black); text-decoration: none; text-transform: uppercase; font-weight: 700; font-size: 18px; letter-spacing: .08em; transition: transform .15s, filter .15s, box-shadow .15s; box-shadow: 0 0 0 0 rgba(255,153,0,0); }
+  .btn:hover { transform: translateY(-2px); filter: brightness(1.08); box-shadow: 0 0 24px 0 color-mix(in srgb, var(--c, var(--orange)) 50%, transparent); }
+  .btn.ghost { background: transparent; color: var(--c, var(--orange)); border: 2px solid var(--c, var(--orange)); }
+  .btn.ghost.soon { opacity: .6; cursor: default; }
+  .btn.ghost.soon:hover { transform: none; box-shadow: none; filter: none; }
+  .btn > span { display: flex; flex-direction: column; line-height: 1; gap: 3px; }
+  .btn small { font-size: 11px; opacity: .8; font-weight: 400; letter-spacing: .12em; }
+  .btn svg { width: 22px; height: 22px; }
+  .qr { background: #fff; border-radius: 18px; padding: 14px; width: min(100%, 260px); justify-self: center; position: relative; }
+  .qr img { width: 100%; display: block; }
+  .qr span { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); background: var(--gold); color: var(--black); font-size: 12px; font-weight: 700; text-transform: uppercase; padding: 4px 12px; border-radius: 12px; white-space: nowrap; letter-spacing: .1em; }
+
+  /* readouts */
+  .readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .readout { background: var(--panel); border-left: 6px solid var(--c, var(--gold)); border-radius: 6px; padding: 10px 12px; }
+  .readout b { display: block; font-size: 30px; color: var(--c, var(--gold)); font-weight: 700; line-height: 1; }
+  .readout span { font-size: 12px; color: var(--gray); text-transform: uppercase; letter-spacing: .12em; }
+  .status { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--gray); text-transform: uppercase; letter-spacing: .1em; }
+  .status i { width: 10px; height: 10px; border-radius: 50%; background: var(--green); animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* features */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border-radius: 14px; padding: 16px; border-top: 4px solid var(--c, var(--lavender)); transition: transform .2s; }
+  .card:hover { transform: translateY(-3px); }
+  .card h3 { margin: 0 0 6px; color: var(--c, var(--lavender)); text-transform: uppercase; font-size: 18px; letter-spacing: .08em; }
+  .card p { margin: 0; color: var(--peach); font-size: 15px; line-height: 1.45; opacity: .9; }
+
+  /* card showcase */
+  .showcase { display: flex; gap: 14px; overflow-x: auto; padding: 16px 4px 24px; scroll-snap-type: x mandatory; scrollbar-color: var(--orange) var(--panel); }
+  .showcase figure { margin: 0; flex: 0 0 auto; width: 210px; scroll-snap-align: start; perspective: 800px; }
+  .showcase img { width: 100%; border-radius: 10px; display: block; box-shadow: 0 10px 30px rgba(0,0,0,.6); transition: transform .25s; transform-style: preserve-3d; }
+  .showcase figure:hover img { transform: rotateY(-8deg) rotateX(4deg) scale(1.04); }
+  .showcase figcaption { font-size: 12px; color: var(--gray); text-transform: uppercase; letter-spacing: .1em; margin-top: 6px; text-align: center; }
+
+  /* steps */
+  ol.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; counter-reset: s; }
+  ol.steps li { background: var(--panel); border-radius: 14px; padding: 16px 16px 16px 64px; position: relative; font-size: 15px; line-height: 1.45; }
+  ol.steps li::before { counter-increment: s; content: counter(s, decimal-leading-zero); position: absolute; left: 14px; top: 12px; font-size: 30px; color: var(--c, var(--blue)); font-weight: 700; }
+
+  footer { margin-top: 20px; color: var(--gray); font-size: 13px; line-height: 1.5; border-top: 2px solid var(--panel); padding-top: 14px; }
+  footer .bottom { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: end; margin-top: 10px; }
+  footer .bottom .corner { background: var(--butter); height: 36px; border-radius: 0 0 0 28px; }
+  footer .bottom .rail { background: var(--butter); height: 14px; border-radius: 0 7px 7px 0; }
+
+  /* scanline sweep */
+  .sweep { position: fixed; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, rgba(255,204,153,.25), transparent); z-index: 2; pointer-events: none; animation: sweep 7s linear infinite; }
+  @keyframes sweep { from { top: -2px; } to { top: 100vh; } }
+
+  @media (max-width: 760px) {
+    .elbow { grid-template-columns: 64px 1fr; }
+    .layout { grid-template-columns: 1fr; }
+    .spine { display: none; }
+    .hero { grid-template-columns: 1fr; }
+    .qr { width: min(100%, 220px); }
+    footer .bottom { grid-template-columns: 64px 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { .sweep, .status i { animation: none; } }
+</style>
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<div class="sweep" aria-hidden="true"></div>
+
+<div class="frame">
+  <header class="elbow" aria-label="MagicTrek">
+    <div class="corner"></div>
+    <div class="title">
+      <h1>MagicTrek</h1>
+      <div class="stardate">Stardate<b id="stardate">—</b></div>
+    </div>
+    <div class="rail"><span></span><span></span><span></span></div>
+  </header>
+
+  <div class="layout">
+    <aside class="spine" aria-hidden="true">
+      <div>LCARS 47</div><div>Nav</div><div>Ops</div><div>Sci</div><div>Deck</div><div>Eng</div><div>Tac</div><div>Med</div>
+    </aside>
+
+    <main>
+      <section class="hero" id="get">
+        <div>
+          <p class="lead">Card battles across the final frontier. Magic: The Gathering–style play with the Star Trek set, on your phone, against your friends.</p>
+          <p class="sub">No server. No account. Two phones on the same Wi‑Fi, over Bluetooth with no network at all, or anywhere in the galaxy through subspace relays. Every move is verified in lockstep on both devices.</p>
+          <div class="buttons">
+            <a class="btn" style="--c: var(--green)" href="https://github.com/Coral-coder/magictrek/releases/latest/download/MagicTrek.apk" id="apk">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18c.16-.31.04-.69-.26-.85-.29-.15-.65-.06-.83.22l-1.88 3.24a11.4 11.4 0 0 0-8.94 0L5.65 5.67a.63.63 0 0 0-.87-.2c-.28.18-.37.54-.22.83L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/></svg>
+              <span>Android APK<small id="apk-sub">latest release</small></span>
+            </a>
+            <a class="btn ghost soon" style="--c: var(--ice)" href="#" aria-disabled="true" onclick="return false">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.63c-.02-2.3 1.88-3.4 1.96-3.45-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.48.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.73c1.24-.02 2.03-1.13 2.79-2.25.88-1.29 1.24-2.54 1.26-2.61-.03-.01-2.42-.93-2.47-3.72zM14.1 5.9c.64-.77 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.11 1.78-.97 2.83 1.03.08 2.07-.52 2.71-1.29z"/></svg>
+              <span>iPhone · TestFlight<small>coming soon</small></span>
+            </a>
+          </div>
+          <div class="status"><i></i><span id="release-line">Querying the release manifest…</span></div>
+        </div>
+        <div class="qr">
+          <img src="qr.svg" alt="QR code linking to the latest Android APK">
+          <span>Scan to install</span>
+        </div>
+      </section>
+
+      <section>
+        <div class="head" style="--c: var(--gold)"><h2>Ship status</h2></div>
+        <div class="readouts">
+          <div class="readout" style="--c: var(--gold)"><b>237</b><span>distinct cards</span></div>
+          <div class="readout" style="--c: var(--orange)"><b>419</b><span>printings, hi‑res</span></div>
+          <div class="readout" style="--c: var(--lavender)"><b>117</b><span>fully automated</span></div>
+          <div class="readout" style="--c: var(--blue)"><b>3</b><span>link types, zero servers</span></div>
+          <div class="readout" style="--c: var(--green)"><b id="build">—</b><span>latest build</span></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="head" style="--c: var(--lavender)"><h2>Systems</h2></div>
+        <div class="grid">
+          <div class="card" style="--c: var(--orange)"><h3>Lockstep multiplayer</h3><p>Both phones run the same rules engine from the same seed. Each move carries a state digest, so the two tables can never drift apart unnoticed.</p></div>
+          <div class="card" style="--c: var(--gold)"><h3>Nearby play</h3><p>Host on Wi‑Fi and the other phone finds you. Or go Bluetooth with no network at all: shuttlecraft, basements, dead zones.</p></div>
+          <div class="card" style="--c: var(--blue)"><h3>Subspace link</h3><p>Share a six‑letter code. Moves travel encrypted through public relays, and the match picks up days later exactly where it stopped.</p></div>
+          <div class="card" style="--c: var(--lavender)"><h3>The full set</h3><p>Every Star Trek printing plus the Commander decks and tokens, with Scryfall’s high‑resolution scans bundled in the app.</p></div>
+          <div class="card" style="--c: var(--green)"><h3>Rules engine</h3><p>Combat, triggers, Station, Sagas, Landfall, Kicker, Discover, Assimilate… 117 cards fully automated, the rest play as printed stats.</p></div>
+          <div class="card" style="--c: var(--butter)"><h3>Your rules</h3><p>London or classic mulligan, free first mulligan, starting life, hand size: toggle them in Settings. The host’s rules travel with the match.</p></div>
+          <div class="card" style="--c: var(--violet)"><h3>Solo & pass‑and‑play</h3><p>A computer opponent that keeps games moving, auto‑saved and resumable, or two captains on one phone.</p></div>
+          <div class="card" style="--c: var(--ice)"><h3>LCARS, naturally</h3><p>Console beeps, haptics, a captain’s log of every event and the starfield you expect from a bridge.</p></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="head" style="--c: var(--orange)"><h2>Crew manifest</h2></div>
+        <div class="showcase">
+          <figure><img src="img/trk-7.jpg" alt="Captain Jean-Luc Picard card" loading="lazy"><figcaption>Picard</figcaption></figure>
+          <figure><img src="img/trk-142.jpg" alt="Captain James T. Kirk card" loading="lazy"><figcaption>Kirk</figcaption></figure>
+          <figure><img src="img/trk-74.jpg" alt="Mr. Spock, Science Officer card" loading="lazy"><figcaption>Spock</figcaption></figure>
+          <figure><img src="img/trk-69.jpg" alt="Lieutenant Commander Data card" loading="lazy"><figcaption>Data</figcaption></figure>
+          <figure><img src="img/trk-80.jpg" alt="Seven of Nine, Unassimilated card" loading="lazy"><figcaption>Seven of Nine</figcaption></figure>
+          <figure><img src="img/trc-1.jpg" alt="The Borg Queen card" loading="lazy"><figcaption>The Borg Queen</figcaption></figure>
+          <figure><img src="img/trk-273.jpg" alt="U.S.S. Enterprise-D, Galaxy-Class card" loading="lazy"><figcaption>Enterprise‑D</figcaption></figure>
+          <figure><img src="img/trc-199.jpg" alt="Klingon Strike Force card" loading="lazy"><figcaption>Klingon Strike Force</figcaption></figure>
+        </div>
+      </section>
+
+      <section>
+        <div class="head" style="--c: var(--blue)"><h2>Engage</h2></div>
+        <ol class="steps" style="--c: var(--blue)">
+          <li><b>Install.</b> Android: scan the code or tap the APK button, open the download, allow installs from your browser once. iPhone: TestFlight link coming soon.</li>
+          <li><b>Pick a deck.</b> Six starter decks, one per faction, or build your own from the full set in the card database.</li>
+          <li><b>Find your opponent.</b> Nearby: one phone hosts, the other taps the host’s name. Remote: share the six‑letter code.</li>
+          <li><b>Play.</b> Tap to target, drag nothing, argue about nothing: the engine enforces the rules on both phones at once.</li>
+        </ol>
+      </section>
+
+      <footer>
+        <p>MagicTrek is a fan project and is not affiliated with Wizards of the Coast or CBS Studios. Card images and data from Scryfall. Magic: The Gathering © Wizards of the Coast. Star Trek © CBS Studios.
+        Source, releases and bug reports: <a href="https://github.com/Coral-coder/magictrek">github.com/Coral-coder/magictrek</a>.</p>
+        <div class="bottom"><div class="corner"></div><div class="rail"></div></div>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Stardate: TNG-style, from today's date.
+  (function () {
+    const d = new Date();
+    const start = new Date(d.getFullYear(), 0, 1);
+    const frac = (d - start) / (365.25 * 86400000);
+    // 41153.7 was 2364 on screen; here the series starts the year the show did.
+    const sd = (41000 + (d.getFullYear() - 1987) * 1000 + frac * 1000).toFixed(1);
+    document.getElementById('stardate').textContent = sd;
+  })();
+
+  // Latest build, from the GitHub API (public repo, CORS-friendly).
+  (async function () {
+    const line = document.getElementById('release-line');
+    try {
+      const r = await fetch('https://api.github.com/repos/Coral-coder/magictrek/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const rel = await r.json();
+      const apk = (rel.assets || []).find(a => a.name === 'MagicTrek.apk');
+      const when = new Date(rel.published_at);
+      const mb = apk ? (apk.size / 1048576).toFixed(0) + ' MB' : '';
+      document.getElementById('build').textContent = rel.tag_name.replace(/^build-/, '#');
+      document.getElementById('apk-sub').textContent = (rel.name || rel.tag_name) + (mb ? ' · ' + mb : '');
+      line.textContent = 'Latest: ' + (rel.name || rel.tag_name) + ' · ' + when.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) + (apk ? ' · ' + apk.download_count + ' downloads' : '');
+    } catch (e) {
+      line.textContent = 'Release manifest unavailable; the download button still works.';
+    }
+  })();
+
+  // Starfield with a slow warp drift.
+  (function () {
+    const c = document.getElementById('stars');
+    const ctx = c.getContext('2d');
+    let w, h, stars = [];
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function size() {
+      w = c.width = innerWidth * devicePixelRatio; h = c.height = innerHeight * devicePixelRatio;
+      stars = Array.from({ length: Math.min(260, Math.floor(w * h / 9000)) }, () => ({ x: Math.random() * w, y: Math.random() * h, z: Math.random() * 0.9 + 0.1 }));
+    }
+    function frame() {
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+      for (const s of stars) {
+        const r = s.z * 1.6 * devicePixelRatio;
+        ctx.fillStyle = s.z > 0.75 ? '#FFE8C8' : s.z > 0.45 ? '#CFD8FF' : '#6E6E90';
+        ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill();
+        if (!reduce) { s.y += s.z * 0.25 * devicePixelRatio; if (s.y > h) { s.y = 0; s.x = Math.random() * w; } }
+      }
+      if (!reduce) requestAnimationFrame(frame);
+    }
+    addEventListener('resize', () => { size(); if (reduce) frame(); });
+    size(); frame();
+  })();
+</script>
+</body>
+</html>

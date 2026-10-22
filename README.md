@@ -58,6 +58,18 @@ Turn notifications are local: when a move arrives (or the computer finishes) whi
 the background, the phone shows "Your move". There is no push service, so the app has to be
 running (foreground or background) to notice a remote move.
 
+## Website
+
+`site/` is the landing page at <https://coral-coder.github.io/magictrek/> (download links, QR code,
+latest release). `.github/workflows/pages.yml` publishes it to GitHub Pages whenever it changes.
+
+## Rules options
+
+Settings → Rules: starting life, opening-hand size, London or classic mulligan, a free first
+mulligan, whether the first player draws on turn one, and the maximum hand size. The rules are
+part of the game's start action, so a saved game replays under the rules it began with and a
+linked match plays by the host's settings.
+
 ## Releases
 
 Put the word **build** in a commit subject (`Build: new card art`, `build`, `*u` also works) and
