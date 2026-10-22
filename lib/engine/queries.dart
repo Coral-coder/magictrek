@@ -656,6 +656,30 @@ extension GameQueries on Game {
     return true;
   }
 
+  /// Extra mana for targeting permanents an opponent controls that have ward.
+  int wardTax(List<ObjectID> targets, PlayerID p) {
+    var tax = 0;
+    for (final t in targets) {
+      if (EffectContext.playerFromObject(t) != null) continue;
+      final o = state.objects[t];
+      if (o != null && o.zone == Zone.battlefield && o.controller != p) tax += characteristics(t).wardCost;
+    }
+    return tax;
+  }
+
+  /// Whether `p` can pay everything casting this card with these choices costs: mana cost, X,
+  /// kicker, ward on the targets, minus reductions.
+  bool canAffordCast(ObjectID id, PlayerID p, {List<ObjectID> targets = const [], bool kicked = false, int x = 0}) {
+    final o = state.objects[id];
+    final card = o == null ? null : cardOf(o);
+    if (o == null || card == null) return false;
+    final cost = card.cost..generic += o.extraCost + (card.cost.hasX ? x : 0) + wardTax(targets, p);
+    final k = db.parsed(card).kicker;
+    if (kicked && k != null) cost.add(k);
+    reduceCost(cost, card, p, targets);
+    return manaPlan(cost, p, forSpell: card) != null;
+  }
+
   /// The largest X `p` can pay for when casting this card (0 when it has no X).
   int maxX(ObjectID id, PlayerID p) {
     final o = state.objects[id];

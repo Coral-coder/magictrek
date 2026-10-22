@@ -81,6 +81,13 @@ class CastPurpose extends Purpose {
   final int x;
 }
 
+/// Casting a card for free while a card offers it (Spock, Sisko, Discover).
+class FreeCastPurpose extends Purpose {
+  const FreeCastPurpose(this.card, this.mode);
+  final ObjectID card;
+  final int? mode;
+}
+
 class ActivatePurpose extends Purpose {
   const ActivatePurpose(this.object, this.index);
   final ObjectID object;
@@ -366,6 +373,23 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+  /// Choosing the mode and targets of a free cast, then answering the question with them.
+  void beginFreeCast(ObjectID id, {int? mode}) {
+    final card = game.card(id);
+    if (card == null) return;
+    final modal = game.db.parsed(card).spellEffects.whereType<Modal>().firstOrNull;
+    if (modal != null && mode == null) {
+      _showSheet('${card.name}: choose one', [for (var i = 0; i < modal.modes.length; i++) _sheetButton(game.describeEffects(modal.modes[i]), () => beginFreeCast(id, mode: i), color: LCARS.lavender)]);
+      return;
+    }
+    final reqs = game.targetRequirementsForCard(card, mode).where((r) => game.legalTargets(r.filter, me, id).isNotEmpty).toList();
+    if (reqs.isEmpty) {
+      perform(RespondAction(FreeCastResponse(cast: true, mode: mode)));
+    } else {
+      setState(() => interaction = Targeting(requirements: reqs, chosen: const [], purpose: FreeCastPurpose(id, mode)));
+    }
+  }
+
   void beginCast(ObjectID id, {required bool kicked, int? mode, int? x}) {
     final card = game.card(id);
     if (card == null) return;
@@ -548,6 +572,8 @@ class _GameScreenState extends State<GameScreen> {
     switch (t.purpose) {
       case CastPurpose p:
         perform(CastAction(p.card, targets: t.chosen, kicked: p.kicked, mode: p.mode, x: p.x));
+      case FreeCastPurpose p:
+        perform(RespondAction(FreeCastResponse(cast: true, mode: p.mode, targets: t.chosen)));
       case ActivatePurpose p:
         ObjectID? sacrifice;
         final obj = state.objects[p.object];
@@ -1829,6 +1855,19 @@ class _GameScreenState extends State<GameScreen> {
             _small('Keep', () => perform(const RespondAction(ExploreResponse(false))), color: LCARS.green, width: 60),
             const SizedBox(width: 4),
             _small('Graveyard', () => perform(const RespondAction(ExploreResponse(true))), color: LCARS.red, fill: false, width: 90),
+          ],
+        );
+      case FreeCastDecision c:
+        return Row(
+          children: [
+            GestureDetector(onTap: () => showCardSheet(c.card, const []), child: CardFace(card: game.card(c.card), width: 40)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Cast ${game.name(c.card)} for free?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Cast free', () => beginFreeCast(c.card), color: LCARS.green, width: 96),
+            const SizedBox(width: 4),
+            _small(c.toHandIfDeclined ? 'To hand' : "Don't", () => perform(const RespondAction(FreeCastResponse(cast: false))), color: LCARS.peach, fill: false, width: 80),
           ],
         );
       case DiscoverDecision c:

@@ -1566,6 +1566,31 @@ class Game {
           throw GameError("That answer doesn't fit the question");
         }
         resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
+      case FreeCastDecision d:
+        if (r is! FreeCastResponse) {
+          state.pending = pending;
+          throw GameError("That answer doesn't fit the question");
+        }
+        final c = card(d.card);
+        if (r.cast && c != null) {
+          final modal = db.parsed(c).spellEffects.whereType<Modal>().firstOrNull;
+          final m = r.mode;
+          if (modal != null && (m == null || m < 0 || m >= modal.modes.length)) {
+            state.pending = pending;
+            throw GameError('Choose a mode');
+          }
+          try {
+            _validateTargets(r.targets, targetRequirementsForCard(c, m), pending.player, d.card);
+          } catch (_) {
+            state.pending = pending;
+            rethrow;
+          }
+          castFree(d.card, pending.player, mode: m, targets: r.targets);
+        } else if (d.toHandIfDeclined) {
+          move(d.card, Zone.hand);
+          log(GameEvent('toHand', player: pending.player, object: d.card));
+        }
+        resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
       case DiscoverDecision d:
         if (r is! DiscoverResponse) {
           state.pending = pending;

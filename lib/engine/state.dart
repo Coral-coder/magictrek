@@ -295,6 +295,15 @@ class DiscoverDecision extends Decision {
   final ObjectID card;
 }
 
+/// "You may cast that card without paying its mana cost" (Commander Spock, Benjamin Sisko,
+/// Discover): the player picks a mode and targets, or declines. Declining a discovered card puts
+/// it into their hand.
+class FreeCastDecision extends Decision {
+  const FreeCastDecision(this.card, {this.toHandIfDeclined = false});
+  final ObjectID card;
+  final bool toHandIfDeclined;
+}
+
 /// What a player answers a `Decision` with. Serialised inside actions.
 sealed class DecisionResponse with Props {
   const DecisionResponse();
@@ -325,6 +334,8 @@ sealed class DecisionResponse with Props {
         return ExploreResponse(j['g'] as bool);
       case 'discover':
         return DiscoverResponse(j['p'] as bool);
+      case 'freecast':
+        return FreeCastResponse(cast: j['c'] as bool, mode: j['m'] as int?, targets: ((j['ids'] as List?) ?? const []).cast<int>());
     }
     throw ArgumentError('Unknown response ${j['t']}');
   }
@@ -428,6 +439,17 @@ class DiscoverResponse extends DecisionResponse {
   Map<String, dynamic> toJson() => {'t': 'discover', 'p': play};
 }
 
+class FreeCastResponse extends DecisionResponse {
+  const FreeCastResponse({required this.cast, this.mode, this.targets = const []});
+  final bool cast;
+  final int? mode;
+  final List<ObjectID> targets;
+  @override
+  List<Object?> get props => [cast, mode, targets];
+  @override
+  Map<String, dynamic> toJson() => {'t': 'freecast', 'c': cast, if (mode != null) 'm': mode, if (targets.isNotEmpty) 'ids': targets};
+}
+
 /// The continuation of an interrupted effect sequence.
 class Resume {
   Resume({
@@ -480,6 +502,7 @@ enum ResumeKind {
   chooseColor,
   peace,
   chooseModes,
+  freeCast,
 }
 
 /// A spell waiting to resolve. Abilities resolve at once; only spells use the stack, which is
@@ -527,7 +550,7 @@ class DelayedTrigger {
 /// A triggered ability waiting for an open decision to finish.
 class QueuedTrigger {
   QueuedTrigger({required this.source, required this.controller, required this.effects, required this.context});
-  final ObjectID source;
+  final ObjectID? source;
   final PlayerID controller;
   final List<Effect> effects;
   final EffectContext context;

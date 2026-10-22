@@ -464,8 +464,26 @@ void main() {
       final spock = game.newObject(cardID: db.byName('Commander Spock')!.id, owner: 0, zone: Zone.hand);
       game.move(spock, Zone.battlefield, controller: 0);
       game.fireTriggers(SimpleTrigger.enters, spock);
+      // A human player is asked; the card waits on top of the library meanwhile.
+      expect(game.state.pending?.decision, isA<FreeCastDecision>());
+      final hand = game.state.players[0].hand.length;
+      game.apply(const RespondAction(FreeCastResponse(cast: true)));
       passWindows(game);
       expect(game.state.objects[drednok]!.zone, Zone.battlefield, reason: 'mana value 1 <= 2 differently named lands');
+      expect(game.state.players[0].hand.length, hand, reason: 'it left the top, so no draw');
+    });
+
+    test('Commander Spock: declining the free cast draws the card instead', () {
+      final game = makeGame([]);
+      giveLands(game, 0, 'Plains', 1);
+      giveLands(game, 0, 'Island', 1);
+      final drednok = game.newObject(cardID: db.byName('Relentless Drednok')!.id, owner: 0, zone: Zone.library);
+      game.state.players[0].library.insert(0, drednok);
+      final spock = game.newObject(cardID: db.byName('Commander Spock')!.id, owner: 0, zone: Zone.hand);
+      game.move(spock, Zone.battlefield, controller: 0);
+      game.fireTriggers(SimpleTrigger.enters, spock);
+      game.apply(const RespondAction(FreeCastResponse(cast: false)));
+      expect(game.state.objects[drednok]!.zone, Zone.hand, reason: 'still on top, so it is drawn');
     });
 
     test('Peace in Our Time: drawing stops the attack and wins only at twelve counters', () {
@@ -563,6 +581,24 @@ void main() {
       passWindows(game);
       if (game.state.pending?.decision is ChooseOptionalDecision) game.apply(const RespondAction(NoResponse()));
       expect(game.state.objects[aura]!.attachedTo, relic);
+    });
+    test('effects after a player\'s choice still happen (First Contact gains 2 life)', () {
+      final game = makeGame([db.byName('First Contact')!.id]);
+      giveLands(game, 0, 'Forest', 2);
+      // Mill four permanent cards so there is a choice to make.
+      for (var i = 0; i < 4; i++) {
+        final id = game.newObject(cardID: db.byName('Mugato')!.id, owner: 0, zone: Zone.library);
+        game.state.players[0].library.insert(0, id);
+      }
+      final life = game.state.players[0].life;
+      game.apply(CastAction(game.state.players[0].hand.first));
+      passWindows(game);
+      final pending = game.state.pending;
+      expect(pending?.decision, isA<ChooseCardsDecision>());
+      final pick = (pending!.decision as ChooseCardsDecision).cards.first;
+      game.apply(RespondAction(CardsResponse([pick])));
+      expect(game.state.objects[pick]!.zone, Zone.hand);
+      expect(game.state.players[0].life, life + 2, reason: 'first spell of the game');
     });
   });
 }

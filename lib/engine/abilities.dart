@@ -868,6 +868,23 @@ class ExileTopPutPermanents extends Effect {
 
 /// Commander Spock: reveal the top card; cast it free if its mana value is at most `max`, or put
 /// a land onto the battlefield tapped; if it's still on top, draw a card.
+/// Offers its controller a free cast of one card (put there by Spock, Sisko or Discover).
+class OfferFreeCast extends Effect {
+  const OfferFreeCast(this.card, {this.toHandIfDeclined = false});
+  final int card;
+  final bool toHandIfDeclined;
+  @override
+  List<Object?> get props => [card, toHandIfDeclined];
+}
+
+/// Commander Spock: "If that card is still on top of your library, draw a card."
+class DrawIfStillOnTop extends Effect {
+  const DrawIfStillOnTop(this.card);
+  final int card;
+  @override
+  List<Object?> get props => [card];
+}
+
 class RevealTopCastFree extends Effect {
   const RevealTopCastFree(this.max);
   final Amount max;

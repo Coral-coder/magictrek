@@ -82,7 +82,32 @@ class Bot {
         return ExploreResponse(exploreToGraveyard(game, d.card, p));
       case DiscoverDecision _:
         return const DiscoverResponse(true);
+      case FreeCastDecision d:
+        final choice = freeCastChoice(game, d.card, p);
+        return choice == null ? const FreeCastResponse(cast: false) : FreeCastResponse(cast: true, mode: choice.$1, targets: choice.$2);
     }
+  }
+
+  /// The mode and targets for casting a card for free, or null when it isn't worth casting
+  /// (it needs a target and none is a good one).
+  static (int?, List<ObjectID>)? freeCastChoice(Game game, ObjectID id, PlayerID p) {
+    final c = game.card(id);
+    if (c == null) return null;
+    final parsed = game.db.parsed(c);
+    final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
+    final mode = modal == null ? null : chooseMode(game, modal.modes, p, id);
+    final targets = <ObjectID>[];
+    for (final r in game.targetRequirementsForCard(c, mode)) {
+      final legal = game.legalTargets(r.filter, p, id);
+      final effect = parsed.spellEffects.where((e) {
+        final t = targetOf(e);
+        return t is ChosenTarget && t.filter == r.filter;
+      }).firstOrNull;
+      final chosen = chooseTargets(game, r.filter, r.count, true, legal, p, effect);
+      if (chosen.isEmpty && !r.optional && legal.isNotEmpty) return null;
+      targets.addAll(chosen);
+    }
+    return (mode, targets);
   }
 
   /// Rough worth of a permanent: used to pick targets and trades.
@@ -331,13 +356,21 @@ class Bot {
         targets.addAll(chosen);
       }
       if (!ok) continue;
+      // Ward on a target adds to the cost: drop the kicker or lower X to afford it, else skip.
+      var spend = x;
+      if (!game.canAffordCast(id, p, targets: targets, kicked: kicked, x: spend)) {
+        while (spend > 0 && !game.canAffordCast(id, p, targets: targets, kicked: kicked, x: spend)) {
+          spend--;
+        }
+        if (!game.canAffordCast(id, p, targets: targets, kicked: kicked, x: spend)) continue;
+      }
       var score = card.manaValue * 3 + (card.isCreature ? card.basePower + card.baseToughness : 0) + targetValue;
       if ((card.isInstant || card.isSorcery) && targetValue == 0 && parsed.spellEffects.any((e) => e is Damage)) score -= 5;
       if (card.isLegendary && game.state.permanentsOf(p).any((o) => game.cardOf(o)?.name == card.name)) continue;
       if (game.state.players[opp].life <= 0) continue;
       if (score > bestScore) {
         bestScore = score;
-        best = CastAction(id, targets: targets, kicked: kicked, mode: mode, x: x);
+        best = CastAction(id, targets: targets, kicked: kicked, mode: mode, x: spend);
       }
     }
     return best;
@@ -369,6 +402,7 @@ class Bot {
           final reqs = game.targetRequirementsForCard(card, mode, kicked: kicked);
           if (reqs.isEmpty || reqs.first.filter.kind != FilterKind.spell) continue;
           if (!game.legalTargets(reqs.first.filter, p, id).contains(top.id)) continue;
+          if (!game.canAffordCast(id, p, targets: [top.id], kicked: kicked)) continue;
           return CastAction(id, targets: [top.id], mode: mode, kicked: kicked);
         }
         continue;
@@ -385,7 +419,7 @@ class Bot {
           if (reqs.isEmpty) continue;
           final legal = game.legalTargets(reqs.first.filter, p, id);
           final t = threatened.where(legal.contains).firstOrNull;
-          if (t != null) return CastAction(id, targets: [t]);
+          if (t != null && game.canAffordCast(id, p, targets: [t])) return CastAction(id, targets: [t]);
         }
       }
       return null;
@@ -562,6 +596,7 @@ class Bot {
         }
         if (!ok) continue;
         if (game.state.phase == Phase.main1 && !cost.mana.isFree && bestCast(game, p) != null) continue;
+        if (!game.canPay(cost.mana.copy()..generic += game.wardTax(targets, p), p)) continue;
         return ActivateAbilityAction(o.id, i, targets: targets);
       }
     }
