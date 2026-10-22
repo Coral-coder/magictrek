@@ -16,10 +16,6 @@
 # name and the bundle ID to the scheme's PRODUCT_BUNDLE_IDENTIFIER. Override any of them with
 # repository variables (Settings → Secrets and variables → Actions → Variables):
 #   IOS_DIR, XCODE_PROJECT, XCODE_SCHEME, BUNDLE_ID, APP_NAME (App Store name), APP_SKU
-# App-specific preparation (writing a config plist from a secret, toolchain workarounds) goes
-# in an executable .github/scripts/pre-build.sh: it runs in the project folder after Xcode is
-# selected and before the project is generated, with every repository secret as JSON in
-# $SECRETS_JSON (read one with: jq -r '.NAME // empty' <<<"$SECRETS_JSON").
 # A repo with no iOS project yet skips the build with a notice.
 #
 # New apps: the bundle ID is registered with the API key if it isn't yet. App Store Connect's
@@ -140,6 +136,53 @@ jobs:
           chmod 600 "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
           echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
 
+      - name: Inject the APNs auth key (direct partner-to-partner push)
+        # Only for apps that have Sources/Push (Bond-touch-beyond's layout).
+        if: hashFiles('Sources/Push/**') != ''
+        # Accepts whatever the secrets were named — a missing secret resolves to an empty
+        # string, so we just take the first non-empty candidate for each value. Team id
+        # falls back to APPLE_TEAM_ID (already used for App Store Connect).
+        env:
+          KID_1: ${{ secrets.APNS_KEY_ID }}
+          KID_2: ${{ secrets.APNS_KID }}
+          KID_3: ${{ secrets.APN_KEY_ID }}
+          KID_4: ${{ secrets.PUSH_KEY_ID }}
+          TID_1: ${{ secrets.APNS_TEAM_ID }}
+          TID_2: ${{ secrets.APPLE_TEAM_ID }}
+          TID_3: ${{ secrets.APN_TEAM_ID }}
+          TID_4: ${{ secrets.TEAM_ID }}
+          P8_1: ${{ secrets.APNS_KEY_P8 }}
+          P8_2: ${{ secrets.APNS_P8 }}
+          P8_3: ${{ secrets.APNS_AUTH_KEY }}
+          P8_4: ${{ secrets.APNS_PRIVATE_KEY }}
+          P8_5: ${{ secrets.APNS_KEY }}
+          P8_6: ${{ secrets.APN_KEY_P8 }}
+          P8_7: ${{ secrets.PUSH_KEY_P8 }}
+        run: |
+          first() { for v in "$@"; do if [ -n "$v" ]; then printf '%s' "$v"; return; fi; done; }
+          KID="$(first "$KID_1" "$KID_2" "$KID_3" "$KID_4")"
+          TID="$(first "$TID_1" "$TID_2" "$TID_3" "$TID_4")"
+          P8="$(first "$P8_1" "$P8_2" "$P8_3" "$P8_4" "$P8_5" "$P8_6" "$P8_7")"
+          if [ -z "$P8" ] || [ -z "$KID" ] || [ -z "$TID" ]; then
+            echo "::warning::APNs not fully configured (keyID=$([ -n "$KID" ] && echo yes || echo no), teamID=$([ -n "$TID" ] && echo yes || echo no), p8=$([ -n "$P8" ] && echo yes || echo no)). Direct push stays dormant; CloudKit push still used. Expected secret names: APNS_KEY_ID, APNS_TEAM_ID (or APPLE_TEAM_ID), APNS_KEY_P8."
+            exit 0
+          fi
+          mkdir -p Sources/Push
+          {
+            echo 'import Foundation'
+            echo ''
+            echo '// Generated at build time from GitHub secrets. Not the committed source.'
+            echo 'enum APNsSecrets {'
+            echo "    static let keyID = \"$KID\""
+            echo "    static let teamID = \"$TID\""
+            echo '    static let privateKeyP8 = """'
+            printf '%s\n' "$P8"
+            echo '"""'
+            echo '    static var isConfigured: Bool { !keyID.isEmpty && !teamID.isEmpty && !privateKeyP8.isEmpty }'
+            echo '}'
+          } > Sources/Push/APNsSecrets.swift
+          echo "APNs key injected (kid $KID) — direct push enabled for this build."
+
       - name: Select Xcode 26 or later
         run: |
           xcode=$(ls -d /Applications/Xcode_2[6-9]*.app /Applications/Xcode_[3-9][0-9]*.app 2>/dev/null | sort -V | tail -1)
@@ -149,12 +192,9 @@ jobs:
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
 
-      - name: App-specific pre-build steps
-        env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-        run: |
-          hook="$GITHUB_WORKSPACE/.github/scripts/pre-build.sh"
-          if [ -f "$hook" ]; then bash "$hook"; else echo "No .github/scripts/pre-build.sh"; fi
+      - name: Fetch libsignal_ffi (Signal protocol core)
+        if: hashFiles('scripts/fetch-libsignal-ffi.sh') != ''
+        run: scripts/fetch-libsignal-ffi.sh
 
       - name: Find the project, scheme and bundle ID
         env:
@@ -183,13 +223,10 @@ jobs:
           if [ -z "$scheme" ]; then echo "::error::No scheme in $project; set the XCODE_SCHEME variable"; exit 1; fi
           bundle="$BUNDLE_ID"
           if [ -z "$bundle" ]; then
-            # The scheme also builds its extensions and libraries; take the app target's ID.
-            bundle=$(xcodebuild -project "$project" -scheme "$scheme" -configuration Release -showBuildSettings -json 2>/dev/null \
-              | python3 -c 'import json,sys
-          targets = json.load(sys.stdin)
-          apps = [t for t in targets if t["buildSettings"].get("WRAPPER_EXTENSION") == "app"]
-          pick = next((t for t in apps if t.get("target") == sys.argv[1]), apps[0] if apps else None)
-          print(pick["buildSettings"].get("PRODUCT_BUNDLE_IDENTIFIER", "") if pick else "")' "$scheme")
+            # The scheme also builds embedded targets (watch app, frameworks); take the
+            # bundle id from the block for the scheme's own target.
+            bundle=$(xcodebuild -project "$project" -scheme "$scheme" -configuration Release -showBuildSettings 2>/dev/null \
+              | awk -v t="$scheme" '/^Build settings for action .* and target /{inside = ($NF == t":")} inside && /^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER = /{print $3; exit}')
           fi
           if [ -z "$bundle" ]; then echo "::error::Couldn't read the bundle ID; set the BUNDLE_ID variable"; exit 1; fi
           name="${APP_NAME:-$scheme}"
@@ -297,23 +334,37 @@ jobs:
       - name: Archive
         run: |
           mkdir -p build
-          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
-            -destination 'generic/platform=iOS' -archivePath "build/$SCHEME.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
-            ENABLE_DEBUG_DYLIB=NO ENABLE_PREVIEWS=NO \
-            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            archive > build/xcodebuild.log 2>&1 || {
-              # Surface compiler errors as annotations (readable without downloading the log).
-              grep -E ': error: ' build/xcodebuild.log | sort -u | head -30 | while IFS= read -r line; do
-                echo "::error::$(echo "$line" | sed -E "s#^$GITHUB_WORKSPACE/##")"
-              done
-              tail -80 build/xcodebuild.log
-              exit 1
-            }
+          archive() {
+            xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+              -destination 'generic/platform=iOS' -archivePath "build/$SCHEME.xcarchive" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$ASC_KEY_PATH" \
+              -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+              DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
+              APP_BUNDLE_ID="$BUNDLE_ID" \
+              ENABLE_DEBUG_DYLIB=NO ENABLE_PREVIEWS=NO \
+              MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+              archive > build/xcodebuild.log 2>&1
+          }
+          ok=false
+          # A new target's provisioning profile is created during the archive, and Xcode can
+          # look for its file before it's written ("Build input file cannot be found:
+          # …mobileprovision"). The profile then exists, so archiving again gets past it — up
+          # to three tries, only for that error.
+          for attempt in 1 2 3; do
+            if archive; then ok=true; break; fi
+            grep -q "Build input file cannot be found: .*\.mobileprovision" build/xcodebuild.log || break
+            echo "New provisioning profile wasn't ready yet; archiving again (try $((attempt + 1)))"
+          done
+          if [ "$ok" != true ]; then
+            # Surface compiler errors as annotations (readable without downloading the log).
+            grep -E ': error: ' build/xcodebuild.log | sort -u | head -30 | while IFS= read -r line; do
+              echo "::error::$(echo "$line" | sed -E "s#^$GITHUB_WORKSPACE/##")"
+            done
+            tail -80 build/xcodebuild.log
+            exit 1
+          fi
           tail -60 build/xcodebuild.log
 
       - name: Upload to TestFlight
