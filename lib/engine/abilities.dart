@@ -38,6 +38,7 @@ enum KeywordKind {
 class Keyword with Props {
   const Keyword(this.kind, [this.value = 0]);
   final KeywordKind kind;
+
   /// Ward's cost; otherwise 0.
   final int value;
 
@@ -101,6 +102,7 @@ enum FilterKind {
   creatureCardInGraveyard,
   basicLandCardInLibrary,
   artifactOrCreature,
+  spell,
 }
 
 /// Which permanents or players something applies to.
@@ -205,18 +207,10 @@ class EachTarget extends Target {
 }
 
 class TokenSpec with Props {
-  TokenSpec({
-    required this.name,
-    this.power = 0,
-    this.toughness = 0,
-    List<ManaColor>? colors,
-    List<String>? subtypes,
-    List<Keyword>? keywords,
-    this.isArtifact = false,
-    this.isCreature = true,
-  })  : colors = colors ?? [],
-        subtypes = subtypes ?? [],
-        keywords = keywords ?? [];
+  TokenSpec({required this.name, this.power = 0, this.toughness = 0, List<ManaColor>? colors, List<String>? subtypes, List<Keyword>? keywords, this.isArtifact = false, this.isCreature = true})
+    : colors = colors ?? [],
+      subtypes = subtypes ?? [],
+      keywords = keywords ?? [];
 
   String name;
   final int power, toughness;
@@ -229,30 +223,38 @@ class TokenSpec with Props {
   static TokenSpec get clue => TokenSpec(name: 'Clue', subtypes: ['Clue'], isArtifact: true, isCreature: false);
   static TokenSpec get food => TokenSpec(name: 'Food', subtypes: ['Food'], isArtifact: true, isCreature: false);
 
-  TokenSpec copyWith({List<Keyword>? keywords, String? name}) =>
-      TokenSpec(name: name ?? this.name, power: power, toughness: toughness, colors: List.of(colors), subtypes: List.of(subtypes), keywords: keywords ?? List.of(this.keywords), isArtifact: isArtifact, isCreature: isCreature);
+  TokenSpec copyWith({List<Keyword>? keywords, String? name}) => TokenSpec(
+    name: name ?? this.name,
+    power: power,
+    toughness: toughness,
+    colors: List.of(colors),
+    subtypes: List.of(subtypes),
+    keywords: keywords ?? List.of(this.keywords),
+    isArtifact: isArtifact,
+    isCreature: isCreature,
+  );
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'power': power,
-        'toughness': toughness,
-        'colors': colors.map((c) => c.symbol).toList(),
-        'subtypes': subtypes,
-        'keywords': keywords.map((k) => [k.kind.name, k.value]).toList(),
-        'isArtifact': isArtifact,
-        'isCreature': isCreature,
-      };
+    'name': name,
+    'power': power,
+    'toughness': toughness,
+    'colors': colors.map((c) => c.symbol).toList(),
+    'subtypes': subtypes,
+    'keywords': keywords.map((k) => [k.kind.name, k.value]).toList(),
+    'isArtifact': isArtifact,
+    'isCreature': isCreature,
+  };
 
   factory TokenSpec.fromJson(Map<String, dynamic> j) => TokenSpec(
-        name: j['name'] as String,
-        power: j['power'] as int,
-        toughness: j['toughness'] as int,
-        colors: (j['colors'] as List).map((e) => ManaColor.fromSymbol(e as String)).whereType<ManaColor>().toList(),
-        subtypes: (j['subtypes'] as List).cast<String>(),
-        keywords: (j['keywords'] as List).map((e) => Keyword(KeywordKind.values.byName((e as List)[0] as String), e[1] as int)).toList(),
-        isArtifact: j['isArtifact'] as bool,
-        isCreature: j['isCreature'] as bool,
-      );
+    name: j['name'] as String,
+    power: j['power'] as int,
+    toughness: j['toughness'] as int,
+    colors: (j['colors'] as List).map((e) => ManaColor.fromSymbol(e as String)).whereType<ManaColor>().toList(),
+    subtypes: (j['subtypes'] as List).cast<String>(),
+    keywords: (j['keywords'] as List).map((e) => Keyword(KeywordKind.values.byName((e as List)[0] as String), e[1] as int)).toList(),
+    isArtifact: j['isArtifact'] as bool,
+    isCreature: j['isCreature'] as bool,
+  );
 
   @override
   List<Object?> get props => [name, power, toughness, colors, subtypes, keywords, isArtifact, isCreature];
@@ -600,6 +602,15 @@ class Conditional extends Effect {
   List<Object?> get props => [condition, effects];
 }
 
+/// Counter target spell (unless its controller pays a cost).
+class CounterSpell extends Effect {
+  const CounterSpell(this.target, {this.unlessPays});
+  final Target target;
+  final ManaCost? unlessPays;
+  @override
+  List<Object?> get props => [target, unlessPays];
+}
+
 enum SpellKind { any, creature, noncreature, artifact, instantOrSorcery }
 
 /// When a triggered ability fires.
@@ -678,7 +689,17 @@ sealed class StaticAbility with Props {
   const StaticAbility();
 }
 
-enum SimpleStaticKind { entersTapped, shockLand, extraLandEachTurn, noMaxHandSize, hexproofWhileNotCreature, cantBeCountered, enchantCreature, enchantCreatureOpponentControls, attachedCantAttackOrBlock }
+enum SimpleStaticKind {
+  entersTapped,
+  shockLand,
+  extraLandEachTurn,
+  noMaxHandSize,
+  hexproofWhileNotCreature,
+  cantBeCountered,
+  enchantCreature,
+  enchantCreatureOpponentControls,
+  attachedCantAttackOrBlock,
+}
 
 class SimpleStatic extends StaticAbility {
   const SimpleStatic(this.kind);
@@ -767,8 +788,7 @@ class GrantTrigger extends StaticAbility {
 }
 
 class ActivationCost with Props {
-  ActivationCost({ManaCost? mana, this.tap = false, this.sacrificeSelf = false, this.sacrifice, this.payLife = 0, this.discard = 0, this.oncePerTurn = false})
-      : mana = mana ?? ManaCost();
+  ActivationCost({ManaCost? mana, this.tap = false, this.sacrificeSelf = false, this.sacrifice, this.payLife = 0, this.discard = 0, this.oncePerTurn = false}) : mana = mana ?? ManaCost();
   final ManaCost mana;
   bool tap, sacrificeSelf, oncePerTurn;
   Filter? sacrifice;

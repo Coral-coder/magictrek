@@ -86,9 +86,11 @@ class Card with Props {
   final String artist;
   final bool variant;
   final String imageLarge;
+
   /// A token card from the set's token sheet (not for decks; used as the face of created tokens).
   final bool token;
   final String scryfallId;
+
   /// Frame effects and promo types ("showcase", "extendedart", "surgefoil"...).
   final List<String> frame;
 
@@ -204,9 +206,7 @@ class Card with Props {
 
 /// A mana cost such as {2}{W}{W} or {X}{R}.
 class ManaCost with Props {
-  ManaCost({this.generic = 0, Map<ManaColor, int>? colored, List<List<ManaColor>>? hybrid, this.hasX = false})
-      : colored = colored ?? {},
-        hybrid = hybrid ?? [];
+  ManaCost({this.generic = 0, Map<ManaColor, int>? colored, List<List<ManaColor>>? hybrid, this.hasX = false}) : colored = colored ?? {}, hybrid = hybrid ?? [];
 
   int generic;
   final Map<ManaColor, int> colored;

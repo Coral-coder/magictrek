@@ -4,8 +4,7 @@ mixin Props {
   List<Object?> get props;
 
   @override
-  bool operator ==(Object other) =>
-      identical(this, other) || (other is Props && runtimeType == other.runtimeType && deepEquals(props, other.props));
+  bool operator ==(Object other) => identical(this, other) || (other is Props && runtimeType == other.runtimeType && deepEquals(props, other.props));
 
   @override
   int get hashCode => Object.hash(runtimeType, deepHash(props));

@@ -18,7 +18,14 @@ sealed class GameAction with Props {
       case 'land':
         return PlayLandAction(j['id'] as int);
       case 'cast':
-        return CastAction(j['id'] as int, targets: (j['targets'] as List?)?.cast<int>() ?? const [], kicked: j['kicked'] as bool? ?? false, mode: j['mode'] as int?, beamUpBounce: j['bounce'] as int?);
+        return CastAction(
+          j['id'] as int,
+          targets: (j['targets'] as List?)?.cast<int>() ?? const [],
+          kicked: j['kicked'] as bool? ?? false,
+          mode: j['mode'] as int?,
+          beamUpBounce: j['bounce'] as int?,
+          x: j['x'] as int? ?? 0,
+        );
       case 'activate':
         return ActivateAbilityAction(j['id'] as int, j['ability'] as int, targets: (j['targets'] as List?)?.cast<int>() ?? const [], sacrifice: j['sacrifice'] as int?, discard: j['discard'] as int?);
       case 'station':
@@ -31,6 +38,8 @@ sealed class GameAction with Props {
         return DeclareAttackersAction((j['ids'] as List).cast<int>());
       case 'pass':
         return const PassPhaseAction();
+      case 'passPriority':
+        return const PassPriorityAction();
       case 'endTurn':
         return const EndTurnAction();
       case 'concede':
@@ -71,16 +80,19 @@ class PlayLandAction extends GameAction {
 }
 
 class CastAction extends GameAction {
-  const CastAction(this.id, {this.targets = const [], this.kicked = false, this.mode, this.beamUpBounce});
+  const CastAction(this.id, {this.targets = const [], this.kicked = false, this.mode, this.beamUpBounce, this.x = 0});
   final ObjectID id;
   final List<ObjectID> targets;
   final bool kicked;
   final int? mode;
   final ObjectID? beamUpBounce;
+
+  /// The value of X for a spell with {X} in its cost.
+  final int x;
   @override
-  List<Object?> get props => [id, targets, kicked, mode, beamUpBounce];
+  List<Object?> get props => [id, targets, kicked, mode, beamUpBounce, x];
   @override
-  Map<String, dynamic> toJson() => {'t': 'cast', 'id': id, 'targets': targets, 'kicked': kicked, 'mode': mode, 'bounce': beamUpBounce};
+  Map<String, dynamic> toJson() => {'t': 'cast', 'id': id, 'targets': targets, 'kicked': kicked, 'mode': mode, 'bounce': beamUpBounce, if (x != 0) 'x': x};
 }
 
 class ActivateAbilityAction extends GameAction {
@@ -137,6 +149,15 @@ class PassPhaseAction extends GameAction {
   List<Object?> get props => const [];
   @override
   Map<String, dynamic> toJson() => {'t': 'pass'};
+}
+
+/// Declines to respond: the spell on top of the stack resolves, or the game moves on.
+class PassPriorityAction extends GameAction {
+  const PassPriorityAction();
+  @override
+  List<Object?> get props => const [];
+  @override
+  Map<String, dynamic> toJson() => {'t': 'passPriority'};
 }
 
 class EndTurnAction extends GameAction {

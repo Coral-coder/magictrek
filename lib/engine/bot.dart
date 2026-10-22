@@ -16,6 +16,10 @@ class Bot {
       if (pending.player != p) return null;
       return RespondAction(decide(game, pending.decision, p));
     }
+    if (s.priority != null) {
+      if (s.priority != p) return null;
+      return bestResponse(game, p) ?? const PassPriorityAction();
+    }
     if (s.activePlayer != p) return null;
     switch (s.phase) {
       case Phase.main1:
@@ -61,6 +65,8 @@ class Bot {
         return CardsResponse(discardChoice(game, p, d.count));
       case ChooseBottomDecision d:
         return CardsResponse(bottomChoice(game, p, d.count));
+      case PayOrCounterDecision _:
+        return const YesResponse();
       case ChooseSacrificeDecision d:
         return SacrificeResponse(sacrificeChoice(game, d.candidates));
       case SurveilDecision d:
@@ -267,6 +273,7 @@ class Bot {
       if (parsed.statics.contains(SimpleStatic.entersTapped)) s -= 3;
       return s;
     }
+
     lands.sort((a, b) => score(b) - score(a));
     return lands.first;
   }
@@ -324,6 +331,63 @@ class Bot {
     return best;
   }
 
+  /// What to do with priority: counter a threatening spell, protect a creature a spell targets,
+  /// kill an attacker, or flash something in at the end of the opponent's turn.
+  static GameAction? bestResponse(Game game, PlayerID p) {
+    final s = game.state;
+    final hand = s.players[p].hand.where((id) => game.canCast(id, p)).toList();
+    if (hand.isEmpty) return null;
+    final top = s.stack.isEmpty ? null : s.stack.last;
+    if (top != null) {
+      if (top.controller == p) return null;
+      final topCard = game.card(top.id);
+      final mine = EffectContext.playerObject(p);
+      final targetsMine = top.context.targets.any((t) => t == mine || (s.objects[t]?.controller == p && s.objects[t]?.zone == Zone.battlefield));
+      final threatening = topCard != null && (topCard.manaValue >= 3 || targetsMine || (topCard.isCreature && topCard.basePower >= 3));
+      for (final id in hand) {
+        final card = game.card(id)!;
+        final fx = game.db.parsed(card).spellEffects;
+        final counters = fx.any((e) => e is CounterSpell || (e is Modal && e.modes.any((m) => m.any((x) => x is CounterSpell))));
+        if (!counters || !threatening) continue;
+        int? mode;
+        final modal = fx.whereType<Modal>().firstOrNull;
+        if (modal != null) mode = modal.modes.indexWhere((m) => m.any((x) => x is CounterSpell));
+        final reqs = game.targetRequirementsForCard(card, mode);
+        if (reqs.isEmpty || reqs.first.filter.kind != FilterKind.spell) continue;
+        if (!game.legalTargets(reqs.first.filter, p, id).contains(top.id)) continue;
+        return CastAction(id, targets: [top.id], mode: mode);
+      }
+      // Protect a creature of ours that the spell targets.
+      final threatened = top.context.targets.where((t) => s.objects[t]?.controller == p && s.objects[t]?.zone == Zone.battlefield).toList();
+      if (threatened.isNotEmpty) {
+        for (final id in hand) {
+          final card = game.card(id)!;
+          final fx = game.db.parsed(card).spellEffects;
+          final protects = fx.any((e) => e is GrantKeyword && (e.keyword.kind == KeywordKind.hexproof || e.keyword.kind == KeywordKind.indestructible));
+          if (!protects) continue;
+          final reqs = game.targetRequirementsForCard(card, null);
+          if (reqs.isEmpty) continue;
+          final legal = game.legalTargets(reqs.first.filter, p, id);
+          final t = threatened.where(legal.contains).firstOrNull;
+          if (t != null) return CastAction(id, targets: [t]);
+        }
+      }
+      return null;
+    }
+    if (s.activePlayer == p) return null;
+    final cast = bestCast(game, p);
+    if (cast is! CastAction) return null;
+    final card = game.card(cast.id);
+    if (card == null) return null;
+    final fx = game.db.parsed(card).spellEffects;
+    if (fx.any((e) => e is CounterSpell)) return null;
+    if (s.phase == Phase.end) return cast;
+    final harmful = fx.any((e) => e is Destroy || e is Exile || e is Damage || e is Bounce || (e is Pump && (e.power < 0 || e.toughness < 0)));
+    if (s.phase == Phase.declareAttackers && harmful && cast.targets.any((t) => s.combat.attackers.contains(t))) return cast;
+    if (card.isCreature && s.phase == Phase.declareAttackers) return cast; // flash in a blocker
+    return null;
+  }
+
   static Target? targetOf(Effect e) {
     switch (e) {
       case Damage x:
@@ -349,6 +413,8 @@ class Bot {
       case CantBlock x:
         return x.target;
       case GainControl x:
+        return x.target;
+      case CounterSpell x:
         return x.target;
       case Untap x:
         return x.target;
@@ -377,12 +443,18 @@ class Bot {
 
   static GameAction? bestStation(Game game, PlayerID p) {
     if (!game.state.phase.isMain) return null;
-    final ships = game.state.permanentsOf(p).where((o) => game.characteristics(o.id).isSpacecraft && !game.characteristics(o.id).isCreature && game.parsedOf(o)?.has(KeywordKind.station) == true).toList();
+    final ships = game.state
+        .permanentsOf(p)
+        .where((o) => game.characteristics(o.id).isSpacecraft && !game.characteristics(o.id).isCreature && game.parsedOf(o)?.has(KeywordKind.station) == true)
+        .toList();
     if (ships.isEmpty) return null;
     final ship = ships.first;
     final opp = game.state.opponentOf(p);
     final oppCreatures = game.state.permanentsOf(opp).where((o) => game.characteristics(o.id).isCreature).toList();
-    final candidates = game.state.permanentsOf(p).where((o) => o.id != ship.id && !o.tapped && game.characteristics(o.id).isCreature && !game.hasSummoningSickness(o) && game.characteristics(o.id).power > 0).toList();
+    final candidates = game.state
+        .permanentsOf(p)
+        .where((o) => o.id != ship.id && !o.tapped && game.characteristics(o.id).isCreature && !game.hasSummoningSickness(o) && game.characteristics(o.id).power > 0)
+        .toList();
     final threshold = game.parsedOf(ship)?.stationThreshold;
     if (threshold == null || candidates.isEmpty) return null;
     final need = threshold - ship.chargeCounters;
@@ -513,6 +585,7 @@ class Bot {
         final bc = game.characteristics(b.id);
         return bc.power >= ac.toughness || bc.has(KeywordKind.deathtouch);
       }
+
       final good = options.where((b) {
         final bc = game.characteristics(b.id);
         final survives = (ac.power < bc.toughness && !ac.has(KeywordKind.deathtouch)) || (!ac.has(KeywordKind.firstStrike) && bc.has(KeywordKind.firstStrike) && kills(b));
@@ -524,6 +597,7 @@ class Bot {
         final sorted = List.of(list)..sort((x, y) => value(x.id, game) - value(y.id, game));
         return sorted.first;
       }
+
       var chosen = <ObjectID>[];
       final g = least(good);
       final t = least(trade);

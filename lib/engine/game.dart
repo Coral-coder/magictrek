@@ -36,32 +36,47 @@ class Game {
       default:
         if (!state.started) throw GameError("The game hasn't started");
         if (state.pending != null) throw GameError('Waiting for a decision');
+        final responding = state.priority != null;
         switch (action) {
-          case PlayLandAction a:
-            _playLand(a.id);
+          case PassPriorityAction _:
+            if (!responding) throw GameError('Nothing to respond to');
+            _passPriority();
           case CastAction a:
-            _cast(a.id, targets: a.targets, kicked: a.kicked, mode: a.mode, beamUpBounce: a.beamUpBounce);
+            _cast(a.id, targets: a.targets, kicked: a.kicked, mode: a.mode, beamUpBounce: a.beamUpBounce, x: a.x);
           case ActivateAbilityAction a:
             _activate(a.id, a.ability, targets: a.targets, sacrifice: a.sacrifice, discard: a.discard);
-          case StationAction a:
-            _station(a.spacecraft, a.creature);
-          case EquipAction a:
-            _equip(a.equipment, a.to);
           case CycleAction a:
             _cycle(a.id);
-          case DeclareAttackersAction a:
-            _declareAttackers(a.ids);
-            _runContinuations();
-          case PassPhaseAction _:
-            _passPhase();
-          case EndTurnAction _:
-            _endTurn();
           default:
-            break;
+            if (responding) throw GameError('Respond or pass first');
+            _applyTurnAction(action);
         }
     }
     state.actionCount++;
     _checkStateBasedActions();
+  }
+
+  /// The player taking actions right now: whoever holds priority, else the active player.
+  PlayerID get actor => state.priority ?? state.activePlayer;
+
+  void _applyTurnAction(GameAction action) {
+    switch (action) {
+      case PlayLandAction a:
+        _playLand(a.id);
+      case StationAction a:
+        _station(a.spacecraft, a.creature);
+      case EquipAction a:
+        _equip(a.equipment, a.to);
+      case DeclareAttackersAction a:
+        _declareAttackers(a.ids);
+        _runContinuations();
+      case PassPhaseAction _:
+        _passPhase();
+      case EndTurnAction _:
+        _endTurn();
+      default:
+        break;
+    }
   }
 
   /// Applies an action for a specific player, checking it is theirs to take.
@@ -104,7 +119,11 @@ class Game {
   }
 
   void _askMulligan(PlayerID p) {
-    state.pending = PendingDecision(player: p, decision: const MulliganDecision(), resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.mulligan));
+    state.pending = PendingDecision(
+      player: p,
+      decision: const MulliganDecision(),
+      resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.mulligan),
+    );
   }
 
   void _beginFirstTurn() {
@@ -137,6 +156,8 @@ class Game {
         owner.exile.remove(id);
       case Zone.battlefield:
         state.players[o.controller].battlefield.remove(id);
+      case Zone.stack:
+        break; // the StackItem is removed by whoever takes it off the stack
     }
   }
 
@@ -171,7 +192,7 @@ class Game {
     o.blocking = null;
     o.assimilated = false;
     o.exiledWithThis = [];
-    o.controller = zone == Zone.battlefield ? (controller ?? o.owner) : o.owner;
+    o.controller = (zone == Zone.battlefield || zone == Zone.stack) ? (controller ?? o.owner) : o.owner;
     if (zone == Zone.battlefield) o.enteredTurn = state.turn;
     final owner = state.players[o.owner];
     switch (zone) {
@@ -189,6 +210,8 @@ class Game {
         owner.exile.add(id);
       case Zone.battlefield:
         state.players[o.controller].battlefield.add(id);
+      case Zone.stack:
+        break;
     }
   }
 
@@ -276,9 +299,22 @@ class Game {
   }
 
   void _runContinuations() {
-    while (state.pending == null && state.turnContinuation.isNotEmpty && !state.isOver) {
+    while (state.pending == null && state.priority == null && !state.isOver) {
+      if (state.stack.isNotEmpty) {
+        _resolveStack();
+        continue;
+      }
+      if (state.turnContinuation.isEmpty) break;
       final step = state.turnContinuation.removeAt(0);
       switch (step) {
+        case TurnStep.attackWindow:
+          _offerPriority(state.combat.defender);
+        case TurnStep.blockWindowActive:
+          if (state.combat.attackers.isNotEmpty) _offerPriority(state.activePlayer);
+        case TurnStep.blockWindowDefender:
+          if (state.combat.attackers.isNotEmpty) _offerPriority(state.combat.defender);
+        case TurnStep.endWindow:
+          _offerPriority(state.opponentOf(state.activePlayer));
         case TurnStep.drawStep:
           _drawStep(state.turn == 1);
         case TurnStep.main1:
@@ -344,6 +380,7 @@ class Game {
         log(GameEvent('died', object: o.id));
       }
     }
+    state.turnContinuation.add(TurnStep.endWindow);
     state.turnContinuation.add(TurnStep.cleanup);
   }
 
@@ -353,7 +390,11 @@ class Game {
     final ps = state.players[p];
     final noMax = ps.noMaxHandSizeUntilNextTurn || state.permanentsOf(p).any((o) => parsedOf(o)?.statics.contains(SimpleStatic.noMaxHandSize) == true);
     if (!noMax && rules.maxHandSize && ps.hand.length > rules.handSize) {
-      state.pending = PendingDecision(player: p, decision: DiscardToHandSizeDecision(ps.hand.length - rules.handSize), resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.cleanup));
+      state.pending = PendingDecision(
+        player: p,
+        decision: DiscardToHandSizeDecision(ps.hand.length - rules.handSize),
+        resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.cleanup),
+      );
       state.turnContinuation.add(TurnStep.nextTurn);
       return;
     }
@@ -403,8 +444,8 @@ class Game {
     _runContinuations();
   }
 
-  void _cast(ObjectID id, {required List<ObjectID> targets, required bool kicked, int? mode, ObjectID? beamUpBounce}) {
-    final p = state.activePlayer;
+  void _cast(ObjectID id, {required List<ObjectID> targets, required bool kicked, int? mode, ObjectID? beamUpBounce, int x = 0}) {
+    final p = actor;
     final o = state.objects[id];
     final card = o == null ? null : cardOf(o);
     if (o == null || card == null) throw GameError('No such card');
@@ -414,12 +455,16 @@ class Game {
     if (o.zone == Zone.graveyard) {
       final beam = parsed.beamMeUp;
       final b = beamUpBounce == null ? null : state.objects[beamUpBounce];
-      if (beam == null || b == null || b.zone != Zone.battlefield || b.controller != p || !characteristics(beamUpBounce!).isCreature) throw GameError("Can't beam that up");
+      if (beam == null || o.owner != p || b == null || b.zone != Zone.battlefield || b.controller != p || !characteristics(beamUpBounce!).isCreature) throw GameError("Can't beam that up");
+      if (!_timingAllows(card, p)) throw GameError("Can't cast that now");
       cost = beam.copy();
       fromGraveyard = true;
     } else {
       if (!canCast(id, p)) throw GameError("Can't cast that now");
     }
+    if (x < 0) throw GameError('X must be 0 or more');
+    if (!card.cost.hasX) x = 0;
+    cost.generic += x;
     if (kicked) {
       final k = parsed.kicker;
       if (k == null) throw GameError('No kicker');
@@ -430,7 +475,7 @@ class Game {
     for (final t in targets) {
       if (EffectContext.playerFromObject(t) == null) {
         final tgt = state.objects[t];
-        if (tgt != null && tgt.controller != p) cost.generic += characteristics(t).wardCost;
+        if (tgt != null && tgt.zone == Zone.battlefield && tgt.controller != p) cost.generic += characteristics(t).wardCost;
       }
     }
     final plan = manaPlan(cost, p);
@@ -441,24 +486,22 @@ class Game {
       log(GameEvent('bounced', object: beamUpBounce));
     }
     state.players[p].spellsCastThisTurn++;
-    log(GameEvent('cast', player: p, object: id, amount: kicked ? 1 : 0));
+    move(id, Zone.stack, controller: p);
     final context = EffectContext()
       ..targets = List.of(targets)
-      ..kicked = kicked;
-    if (card.isPermanent) {
-      move(id, Zone.battlefield, controller: p);
-      if (parsed.isAura && targets.isNotEmpty) state.objects[id]!.attachedTo = targets.first;
-      enteredBattlefield(id, untapped: true);
-    } else {
-      var effects = List.of(parsed.spellEffects);
+      ..kicked = kicked
+      ..x = x;
+    var effects = <Effect>[];
+    if (!card.isPermanent) {
+      effects = List.of(parsed.spellEffects);
       final mi = effects.indexWhere((e) => e is Modal);
       if (mode != null && mi >= 0) {
         final modes = (effects[mi] as Modal).modes;
         if (mode < modes.length) effects = [...effects.sublist(0, mi), ...modes[mode], ...effects.sublist(mi + 1)];
       }
-      resolve(effects, source: id, controller: p, context: context);
-      if (state.objects[id]?.zone != Zone.battlefield) move(id, fromGraveyard ? Zone.exile : Zone.graveyard);
     }
+    state.stack.add(StackItem(id: id, controller: p, effects: effects, context: context, fromGraveyard: fromGraveyard, x: x));
+    log(GameEvent('cast', player: p, object: id, amount: kicked ? 1 : 0));
     final kind = card.isCreature ? SpellKind.creature : SpellKind.noncreature;
     for (final other in state.allPermanents) {
       if (other.controller != p) continue;
@@ -472,6 +515,84 @@ class Game {
       }
     }
     _runContinuations();
+  }
+
+  /// Whether the card's type lets `p` cast it at this moment (ignoring cost and zone).
+  bool _timingAllows(Card card, PlayerID p) {
+    final instantSpeed = card.isInstant || db.parsed(card).has(KeywordKind.flash);
+    if (state.priority != null) return state.priority == p && instantSpeed;
+    if (state.activePlayer != p) return false;
+    if (instantSpeed) return state.phase.isMain || const {Phase.beginCombat, Phase.declareAttackers, Phase.declareBlockers, Phase.combatDamage, Phase.endCombat, Phase.end}.contains(state.phase);
+    return state.phase.isMain && state.stack.isEmpty;
+  }
+
+  /// Resolves spells from the top of the stack, first giving the other player a chance to respond
+  /// to each one. Stops when someone must decide or respond.
+  void _resolveStack() {
+    while (state.stack.isNotEmpty && state.pending == null && state.priority == null && !state.isOver) {
+      final top = state.stack.last;
+      if (!top.windowOffered) {
+        top.windowOffered = true;
+        final other = state.opponentOf(top.controller);
+        if (hasResponses(other)) {
+          state.priority = other;
+          log(GameEvent('priority', player: other, object: top.id));
+          return;
+        }
+      }
+      state.stack.removeLast();
+      _resolveSpell(top);
+      _checkStateBasedActions();
+    }
+  }
+
+  void _resolveSpell(StackItem item) {
+    final o = state.objects[item.id];
+    final card = o == null ? null : cardOf(o);
+    if (o == null || card == null || o.zone != Zone.stack) return;
+    final parsed = db.parsed(card);
+    log(GameEvent('resolved', player: item.controller, object: item.id));
+    if (card.isPermanent) {
+      move(item.id, Zone.battlefield, controller: item.controller);
+      if (parsed.isAura) {
+        final host = item.context.targets.firstOrNull;
+        if (host == null || state.objects[host]?.zone != Zone.battlefield || !characteristics(host).isCreature) {
+          move(item.id, Zone.graveyard);
+          log(GameEvent('fizzled', object: item.id));
+          return;
+        }
+        state.objects[item.id]!.attachedTo = host;
+      }
+      enteredBattlefield(item.id, untapped: true, castBy: item.controller, x: item.x);
+    } else {
+      resolve(item.effects, source: item.id, controller: item.controller, context: item.context);
+      if (state.objects[item.id]?.zone == Zone.stack) move(item.id, item.fromGraveyard ? Zone.exile : Zone.graveyard);
+    }
+  }
+
+  /// Takes a spell off the stack without resolving it.
+  bool counterSpell(ObjectID id) {
+    final i = state.stack.indexWhere((s) => s.id == id);
+    if (i < 0) return false;
+    final item = state.stack.removeAt(i);
+    move(id, item.fromGraveyard ? Zone.exile : Zone.graveyard);
+    log(GameEvent('countered', object: id, player: item.controller));
+    return true;
+  }
+
+  void _passPriority() {
+    final p = state.priority;
+    state.priority = null;
+    log(GameEvent('passed', player: p));
+    _runContinuations();
+  }
+
+  /// Gives `p` a window to respond if they have anything to respond with.
+  void _offerPriority(PlayerID p) {
+    if (hasResponses(p)) {
+      state.priority = p;
+      log(GameEvent('priority', player: p));
+    }
   }
 
   void _validateTargets(List<ObjectID> targets, List<TargetRequirement> reqs, PlayerID controller, ObjectID source) {
@@ -502,7 +623,9 @@ class Game {
     }
   }
 
-  void enteredBattlefield(ObjectID id, {required bool untapped}) {
+  /// `castBy` is set when the permanent arrived by being cast (for "if you cast it"); `x` is the
+  /// value of X it was cast with.
+  void enteredBattlefield(ObjectID id, {required bool untapped, PlayerID? castBy, int x = 0}) {
     final o = state.objects[id];
     if (o == null) return;
     log(GameEvent('entered', object: id));
@@ -521,14 +644,14 @@ class Game {
   }
 
   void _activate(ObjectID id, int index, {required List<ObjectID> targets, ObjectID? sacrifice, ObjectID? discard}) {
-    final p = state.activePlayer;
+    final p = actor;
     final o = state.objects[id];
     final parsed = o == null ? null : parsedOf(o);
     if (o == null || o.controller != p || o.zone != Zone.battlefield || parsed == null || index >= parsed.abilities.length) throw GameError('No such ability');
     final ability = parsed.abilities[index];
     if (ability is! Activated) throw GameError('No such ability');
     final cost = ability.cost;
-    if (ability.sorcerySpeed && !state.phase.isMain) throw GameError('Only as a sorcery');
+    if (ability.sorcerySpeed && (!state.phase.isMain || state.priority != null || state.stack.isNotEmpty || state.activePlayer != p)) throw GameError('Only as a sorcery');
     if (cost.oncePerTurn && o.activatedThisTurn.contains(index)) throw GameError('Already used this turn');
     if (cost.tap) {
       if (o.tapped) throw GameError('Already tapped');
@@ -586,7 +709,15 @@ class Game {
     final p = state.activePlayer;
     final s = state.objects[spacecraft];
     final c = state.objects[creature];
-    if (!state.phase.isMain || s == null || s.controller != p || c == null || c.controller != p || c.tapped || spacecraft == creature || !characteristics(spacecraft).isSpacecraft || parsedOf(s)?.has(KeywordKind.station) != true) {
+    if (!state.phase.isMain ||
+        s == null ||
+        s.controller != p ||
+        c == null ||
+        c.controller != p ||
+        c.tapped ||
+        spacecraft == creature ||
+        !characteristics(spacecraft).isSpacecraft ||
+        parsedOf(s)?.has(KeywordKind.station) != true) {
       throw GameError("Can't station that");
     }
     final cc = characteristics(creature);
@@ -619,7 +750,7 @@ class Game {
   }
 
   void _cycle(ObjectID id) {
-    final p = state.activePlayer;
+    final p = actor;
     final o = state.objects[id];
     final parsed = o == null ? null : parsedOf(o);
     final cyc = parsed?.cycling;
@@ -837,7 +968,11 @@ class Game {
             _draw(p, rules.handSize);
             log(GameEvent('mulliganed', player: p, amount: rules.handSize - cost));
             if (cost > 0) {
-              state.pending = PendingDecision(player: p, decision: ChooseBottomDecision(cost), resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.mulligan));
+              state.pending = PendingDecision(
+                player: p,
+                decision: ChooseBottomDecision(cost),
+                resume: Resume(source: null, controller: p, effects: [], context: EffectContext(), kind: ResumeKind.mulligan),
+              );
             } else {
               _askMulligan(p);
             }
@@ -959,6 +1094,22 @@ class Game {
           throw GameError("That answer doesn't fit the question");
         }
         if (r.toGraveyard && state.players[pending.player].library.firstOrNull == d.card) move(d.card, Zone.graveyard);
+        resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
+      case PayOrCounterDecision d:
+        if (r is YesResponse) {
+          final plan = manaPlan(d.cost, pending.player);
+          if (plan == null) {
+            counterSpell(d.spell);
+          } else {
+            _payMana(plan);
+            log(GameEvent('paid', player: pending.player, text: '${d.cost}'));
+          }
+        } else if (r is NoResponse) {
+          counterSpell(d.spell);
+        } else {
+          state.pending = pending;
+          throw GameError("That answer doesn't fit the question");
+        }
         resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
       case DiscoverDecision d:
         if (r is! DiscoverResponse) {

@@ -22,8 +22,22 @@ int? numberWord(String word) {
   final n = int.tryParse(w);
   if (n != null) return n;
   const words = {
-    'a': 1, 'an': 1, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8,
-    'nine': 9, 'ten': 10, 'eleven': 11, 'twelve': 12, 'thirteen': 13, 'twenty': 20,
+    'a': 1,
+    'an': 1,
+    'one': 1,
+    'two': 2,
+    'three': 3,
+    'four': 4,
+    'five': 5,
+    'six': 6,
+    'seven': 7,
+    'eight': 8,
+    'nine': 9,
+    'ten': 10,
+    'eleven': 11,
+    'twelve': 12,
+    'thirteen': 13,
+    'twenty': 20,
   };
   return words[w];
 }
@@ -481,11 +495,17 @@ class _Parser {
       if (event == null || fx == null) return null;
       return [(event, fx)];
     }
-    m = rx(l, r'(When|Whenever) (.+?) (enters or attacks|attacks or blocks|enters untapped|enters|dies|die|attacks|blocks|becomes blocked|leaves the battlefield|deals combat damage to a player|deals combat damage to a player or planeswalker|deals combat damage to an opponent|becomes tapped|is put into a graveyard from the battlefield), (.+)', dotAll: true);
+    m = rx(
+      l,
+      r'(When|Whenever) (.+?) (enters or attacks|attacks or blocks|enters untapped|enters|dies|die|attacks|blocks|becomes blocked|leaves the battlefield|deals combat damage to a player|deals combat damage to a player or planeswalker|deals combat damage to an opponent|becomes tapped|is put into a graveyard from the battlefield), (.+)',
+      dotAll: true,
+    );
     if (m == null) {
       var n = rx(l, r'Whenever you cast (a|an) (noncreature|creature|artifact|instant or sorcery)? ?spell, (.+)', dotAll: true);
       if (n != null) {
-        final kind = const {'noncreature': SpellKind.noncreature, 'creature': SpellKind.creature, 'artifact': SpellKind.artifact, 'instant or sorcery': SpellKind.instantOrSorcery}[n[2].toLowerCase()] ?? SpellKind.any;
+        final kind =
+            const {'noncreature': SpellKind.noncreature, 'creature': SpellKind.creature, 'artifact': SpellKind.artifact, 'instant or sorcery': SpellKind.instantOrSorcery}[n[2].toLowerCase()] ??
+            SpellKind.any;
         final fx = triggerEffects(n[3]);
         return fx == null ? null : [(CastSpellTrigger(kind), fx)];
       }
@@ -767,14 +787,17 @@ class _Parser {
       i++;
     }
     if (current.toString().trim().isNotEmpty) result.add(current.toString());
-    return result.map((s) {
-      var x = s.trim();
-      while (x.endsWith('.')) {
-        x = x.substring(0, x.length - 1);
-      }
-      if (x.startsWith('Then ') || x.startsWith('then ')) x = x.substring(5);
-      return x;
-    }).where((s) => s.isNotEmpty).toList();
+    return result
+        .map((s) {
+          var x = s.trim();
+          while (x.endsWith('.')) {
+            x = x.substring(0, x.length - 1);
+          }
+          if (x.startsWith('Then ') || x.startsWith('then ')) x = x.substring(5);
+          return x;
+        })
+        .where((s) => s.isNotEmpty)
+        .toList();
   }
 
   Amount? amount(String w) {
@@ -832,6 +855,11 @@ class _Parser {
         }
         return [CopyToken(t, extra)];
       }
+    }
+    if ((m = rx(l, r'counter (target spell(?: with mana value \d+ or less)?)(?: unless its controller pays (\{.+\}))?')) != null) {
+      final t = target(m![1]);
+      if (t == null) return null;
+      return [CounterSpell(t, unlessPays: m[2].isEmpty ? null : ManaCost.parse(m[2].toUpperCase()))];
     }
     if (l.contains(' if ') || l.startsWith('if ') || l.contains(' instead') || l.contains(' unless ')) return null;
 
@@ -1028,7 +1056,8 @@ class _Parser {
       if (a != null) return [CreateTokens(TokenSpec.clue, a, Target.you)];
     }
     if (l == 'investigate') return [CreateTokens(TokenSpec.clue, Amount.one, Target.you)];
-    if ((m = rx(l, '(?:(each player|each opponent|target player|target opponent) )?creates? (?:[^,]+, )?$_num (?:legendary )?(\\d+)/(\\d+) (.+?) creature tokens?(?: with (.+?))?(?: named .+)?')) != null) {
+    if ((m = rx(l, '(?:(each player|each opponent|target player|target opponent) )?creates? (?:[^,]+, )?$_num (?:legendary )?(\\d+)/(\\d+) (.+?) creature tokens?(?: with (.+?))?(?: named .+)?')) !=
+        null) {
       final a = amount(m![2]);
       final who = m[1].isEmpty ? Target.you : target(m[1]);
       if (a != null && who != null) {
@@ -1097,7 +1126,9 @@ class _Parser {
     if (l == 'search your library for a basic land card, put it onto the battlefield, then shuffle') return const [SearchBasicLand(LibraryDestination.battlefield, Target.you)];
     if (l == 'search your library for a basic land card, reveal it, put it into your hand, then shuffle') return const [SearchBasicLand(LibraryDestination.hand, Target.you)];
     if (l == 'its controller may search their library for a basic land card, reveal it, put it into their hand, then shuffle') {
-      return const [Optional([SearchBasicLand(LibraryDestination.hand, Target.controllerOfLastTarget)])];
+      return const [
+        Optional([SearchBasicLand(LibraryDestination.hand, Target.controllerOfLastTarget)]),
+      ];
     }
     if (rx(l, r'sacrifice (it|that token|that creature) at the beginning of the next end step') != null) return const [SacrificeAtEndOfTurn(Target.lastTarget)];
     if ((m = rx(l, r'(.+?) fights (.+)')) != null) {
@@ -1110,7 +1141,11 @@ class _Parser {
     }
     if ((m = rx(l, r'(?:you may )?put a land card from your hand onto the battlefield( tapped)?')) != null) return [PutLandFromHand(m![1].isNotEmpty)];
     // Sacrifice
-    if ((m = rx(l, r'(each opponent|target opponent|target player|each player) sacrifices? (a|an) (nontoken )?(creature|artifact|land|permanent|enchantment|artifact or enchantment|artifact or creature)(?: of their choice)?')) != null) {
+    if ((m = rx(
+          l,
+          r'(each opponent|target opponent|target player|each player) sacrifices? (a|an) (nontoken )?(creature|artifact|land|permanent|enchantment|artifact or enchantment|artifact or creature)(?: of their choice)?',
+        )) !=
+        null) {
       final t = target(m![1]);
       if (t != null) {
         final f = Filter(FilterKind.creature);
@@ -1297,6 +1332,7 @@ class _Parser {
       ('opponent', FilterKind.opponent),
       ('player', FilterKind.player),
       ('token', FilterKind.token),
+      ('spell', FilterKind.spell),
     ];
     var matched = false;
     for (final (noun, kind) in nouns) {

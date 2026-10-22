@@ -100,6 +100,9 @@ class _GameScreenState extends State<GameScreen> {
   PlayerID get them => state.opponentOf(me);
   bool get myTurn => state.activePlayer == me && state.pending == null;
 
+  /// Whether this player may act now: their own turn, or holding priority to respond.
+  bool get canAct => state.playerToAct == me && state.pending == null && !state.isOver;
+
   @override
   void initState() {
     super.initState();
@@ -147,7 +150,7 @@ class _GameScreenState extends State<GameScreen> {
       togglePick(id);
       return;
     }
-    if (interaction is! Idle || !myTurn) return;
+    if (interaction is! Idle || !canAct) return;
     if (game.canPlayLand(id, me)) {
       perform(PlayLandAction(id));
       return;
@@ -170,7 +173,7 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   bool canCycle(ObjectID id) {
-    if (!myTurn) return false;
+    if (!canAct) return false;
     final card = game.card(id);
     if (card == null) return false;
     final cyc = game.db.parsed(card).cycling;
@@ -306,7 +309,7 @@ class _GameScreenState extends State<GameScreen> {
       case PickingCards _:
         break;
       case Idle _:
-        if (obj.controller == me && myTurn) {
+        if (obj.controller == me && canAct) {
           showPermanentMenu(id);
         } else {
           inspect(id);
@@ -713,6 +716,7 @@ class _GameScreenState extends State<GameScreen> {
           if (s.thinking) const ScanLine(color: LCARS.blue, width: 70),
         ]),
         const SizedBox(height: 4),
+        stackStrip(),
         promptBar(),
       ]),
     );
@@ -829,7 +833,8 @@ class _GameScreenState extends State<GameScreen> {
     if (state.isOver) return const SizedBox.shrink();
     final pending = state.pending;
     if (pending != null && pending.player == me) return decisionButtons(pending);
-    if (pending != null || state.activePlayer != me) {
+    if (pending == null && state.priority == me) return priorityButtons();
+    if (pending != null || state.playerToAct != me) {
       return Row(children: [
         Expanded(child: Text(s.isLinked ? 'Waiting for ${state.players[state.playerToAct ?? them].name}…' : '${state.players[them].name} is thinking…', style: LCARS.font(12, color: LCARS.skyBlue))),
       ]);
@@ -858,9 +863,65 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
+  /// Holding priority: respond with an instant (tap it in hand) or let things go on.
+  Widget priorityButtons() {
+    final top = state.stack.isEmpty ? null : state.stack.last;
+    final String text;
+    if (top != null) {
+      text = '${state.players[top.controller].name} casts ${game.name(top.id)}. Respond?';
+    } else {
+      text = switch (state.phase) {
+        Phase.declareAttackers => 'Attackers declared. Cast an instant?',
+        Phase.declareBlockers => 'Blockers declared. Cast an instant?',
+        Phase.end => 'End of turn. Cast an instant?',
+        _ => 'Cast an instant?',
+      };
+    }
+    return Row(children: [
+      Expanded(child: Text(text, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+      _small(top != null ? 'Let it resolve' : 'Pass', () => perform(const PassPriorityAction()), color: LCARS.skyBlue, width: top != null ? 128 : 70),
+    ]);
+  }
+
+  /// Spells waiting to resolve, newest on the right. Tap one to target it (counterspells).
+  Widget stackStrip() {
+    if (state.stack.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 74,
+      child: Row(children: [
+        RotatedBox(quarterTurns: 3, child: Text('STACK', style: LCARS.font(10, color: LCARS.gold))),
+        const SizedBox(width: 4),
+        Expanded(
+          child: ListView(scrollDirection: Axis.horizontal, children: [
+            for (final item in state.stack)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: GestureDetector(
+                  onTap: () => isCandidate(item.id) ? tapPermanent(item.id) : inspect(item.id),
+                  onLongPress: () => inspect(item.id),
+                  child: Container(
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), border: Border.all(color: isCandidate(item.id) ? LCARS.gold : (item.controller == me ? LCARS.orange : LCARS.alert), width: 2)),
+                    child: CardFace(card: game.card(item.id), width: 50),
+                  ),
+                ),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
   Widget decisionButtons(PendingDecision pending) {
     final d = pending.decision;
     switch (d) {
+      case PayOrCounterDecision c:
+        final canPay = game.canPay(c.cost, me);
+        return Row(children: [
+          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+          _small('Pay ${c.cost}', canPay ? () => perform(const RespondAction(YesResponse())) : null, color: LCARS.green, width: 96),
+          const SizedBox(width: 4),
+          _small("Don't", () => perform(const RespondAction(NoResponse())), color: LCARS.red, fill: false, width: 70),
+        ]);
       case MulliganDecision _:
         final taken = state.players[pending.player].mulligans;
         return Row(children: [
@@ -1023,6 +1084,12 @@ class EventText {
         return '${p(e.player)} plays ${n(e.object)}.';
       case 'cast':
         return '${p(e.player)} casts ${n(e.object)}${e.amount == 1 ? ' with kicker' : ''}.';
+      case 'countered':
+        return '${n(e.object)} is countered.';
+      case 'paid':
+        return '${p(e.player)} pays ${e.text}.';
+      case 'fizzled':
+        return '${n(e.object)} has no legal target and fizzles.';
       case 'tokenCreated':
         return '${p(e.player)} creates a ${n(e.object)} token.';
       case 'damage':

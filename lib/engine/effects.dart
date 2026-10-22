@@ -262,7 +262,11 @@ extension GameEffects on Game {
           finishSurveil(controller, Bot.surveil(this, top, controller), top);
           return true;
         }
-        state.pending = PendingDecision(player: controller, decision: SurveilDecision(top), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.surveil));
+        state.pending = PendingDecision(
+          player: controller,
+          decision: SurveilDecision(top),
+          resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.surveil),
+        );
         remaining.clear();
         return true;
       case Scry x:
@@ -272,7 +276,11 @@ extension GameEffects on Game {
           finishScry(controller, Bot.scry(this, top, controller), top);
           return true;
         }
-        state.pending = PendingDecision(player: controller, decision: ScryDecision(top), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.scry));
+        state.pending = PendingDecision(
+          player: controller,
+          decision: ScryDecision(top),
+          resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.scry),
+        );
         remaining.clear();
         return true;
       case Mill x:
@@ -300,7 +308,11 @@ extension GameEffects on Game {
           if (hand.isEmpty) continue;
           final count = x.n < hand.length ? x.n : hand.length;
           if (p == controller && !state.players[p].isBot) {
-            state.pending = PendingDecision(player: p, decision: DiscardToHandSizeDecision(count), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.none));
+            state.pending = PendingDecision(
+              player: p,
+              decision: DiscardToHandSizeDecision(count),
+              resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.none),
+            );
             remaining.clear();
             return true;
           }
@@ -369,7 +381,11 @@ extension GameEffects on Game {
           final candidates = state.permanentsOf(p).where((o) => matches(x.filter, o.id, p, null)).map((o) => o.id).toList();
           if (candidates.isEmpty) continue;
           if (!state.players[p].isBot && candidates.length > 1) {
-            state.pending = PendingDecision(player: p, decision: ChooseSacrificeDecision('$srcName: choose what to sacrifice', candidates), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.sacrifice, sacrificeFilter: x.filter));
+            state.pending = PendingDecision(
+              player: p,
+              decision: ChooseSacrificeDecision('$srcName: choose what to sacrifice', candidates),
+              resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.sacrifice, sacrificeFilter: x.filter),
+            );
             remaining.clear();
             return true;
           }
@@ -406,7 +422,11 @@ extension GameEffects on Game {
           if (state.players[controller].isBot || candidates.length == 1) {
             chosen = Bot.bestCard(this, candidates);
           } else {
-            state.pending = PendingDecision(player: controller, decision: ChooseTargetsDecision(prompt: '$srcName: choose a card in your graveyard', filter: filter, count: 1, optional: false, candidates: candidates), resume: Resume(source: source, controller: controller, effects: [e, ...remaining], context: ctx, kind: ResumeKind.targets));
+            state.pending = PendingDecision(
+              player: controller,
+              decision: ChooseTargetsDecision(prompt: '$srcName: choose a card in your graveyard', filter: filter, count: 1, optional: false, candidates: candidates),
+              resume: Resume(source: source, controller: controller, effects: [e, ...remaining], context: ctx, kind: ResumeKind.targets),
+            );
             remaining.clear();
             return true;
           }
@@ -460,7 +480,11 @@ extension GameEffects on Game {
             if (state.players[controller].isBot) {
               if (Bot.exploreToGraveyard(this, top, controller)) move(top, Zone.graveyard);
             } else {
-              state.pending = PendingDecision(player: controller, decision: ExploreDecision(top, id), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.explore));
+              state.pending = PendingDecision(
+                player: controller,
+                decision: ExploreDecision(top, id),
+                resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.explore),
+              );
               remaining.clear();
               return true;
             }
@@ -494,7 +518,11 @@ extension GameEffects on Game {
           remaining.insertAll(0, x.modes[0]);
           return true;
         }
-        state.pending = PendingDecision(player: controller, decision: ChooseModeDecision('$srcName: choose one', x.modes.map(describeEffects).toList()), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.mode, modes: x.modes));
+        state.pending = PendingDecision(
+          player: controller,
+          decision: ChooseModeDecision('$srcName: choose one', x.modes.map(describeEffects).toList()),
+          resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.mode, modes: x.modes),
+        );
         remaining.clear();
         return true;
       case Optional x:
@@ -505,7 +533,11 @@ extension GameEffects on Game {
           }
           return false;
         }
-        state.pending = PendingDecision(player: controller, decision: ChooseOptionalDecision('$srcName: ${describeEffects(x.effects)}?'), resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.optional, optionalEffects: x.effects));
+        state.pending = PendingDecision(
+          player: controller,
+          decision: ChooseOptionalDecision('$srcName: ${describeEffects(x.effects)}?'),
+          resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.optional, optionalEffects: x.effects),
+        );
         remaining.clear();
         return true;
       case IfDidPrevious x:
@@ -549,7 +581,11 @@ extension GameEffects on Game {
           if (state.players[controller].isBot || candidates.length == 1) {
             chosen = Bot.bestCard(this, candidates);
           } else {
-            state.pending = PendingDecision(player: controller, decision: ChooseTargetsDecision(prompt: '$srcName: choose a creature card to assimilate', filter: x.filter, count: 1, optional: false, candidates: candidates), resume: Resume(source: source, controller: controller, effects: [e, ...remaining], context: ctx, kind: ResumeKind.targets));
+            state.pending = PendingDecision(
+              player: controller,
+              decision: ChooseTargetsDecision(prompt: '$srcName: choose a creature card to assimilate', filter: x.filter, count: 1, optional: false, candidates: candidates),
+              resume: Resume(source: source, controller: controller, effects: [e, ...remaining], context: ctx, kind: ResumeKind.targets),
+            );
             remaining.clear();
             return true;
           }
@@ -629,6 +665,31 @@ extension GameEffects on Game {
         if (plan == null) return false;
         _payMana(plan);
         return true;
+      case CounterSpell x:
+        final ids = targets(x.target, '$srcName: choose a spell to counter');
+        if (ids == null) return false;
+        var any = false;
+        for (final id in ids) {
+          final item = state.stack.where((s) => s.id == id).firstOrNull;
+          if (item == null) continue;
+          final cost = x.unlessPays;
+          if (cost != null && canPay(cost, item.controller)) {
+            if (state.players[item.controller].isBot) {
+              _payMana(manaPlan(cost, item.controller)!);
+              log(GameEvent('paid', player: item.controller, text: '$cost'));
+              continue;
+            }
+            state.pending = PendingDecision(
+              player: item.controller,
+              decision: PayOrCounterDecision('$srcName: pay $cost or ${name(id)} is countered', cost, id),
+              resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.payOrCounter, subject: id),
+            );
+            remaining.clear();
+            return true;
+          }
+          any = counterSpell(id) || any;
+        }
+        return any;
       case CopyToken x:
         final ids = targets(x.target, '$srcName: choose what to copy');
         if (ids == null) return false;
@@ -820,6 +881,8 @@ extension GameEffects on Game {
         return 'pay ${x.cost}';
       case CopyToken _:
         return 'create a copy';
+      case CounterSpell x:
+        return x.unlessPays == null ? 'counter a spell' : 'counter a spell unless ${x.unlessPays} is paid';
       case Conditional x:
         return describeEffects(x.effects);
     }

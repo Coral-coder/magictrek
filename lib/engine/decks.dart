@@ -2,10 +2,7 @@ import 'cards.dart';
 
 /// A deck: card ids with counts. 60 cards, at most 4 of a name (basic lands unlimited).
 class Deck {
-  Deck({String? id, required this.name, Map<String, int>? cards, List<ManaColor>? colors, this.isStarter = false})
-      : id = id ?? _newId(),
-        cards = cards ?? {},
-        colors = colors ?? [];
+  Deck({String? id, required this.name, Map<String, int>? cards, List<ManaColor>? colors, this.isStarter = false}) : id = id ?? _newId(), cards = cards ?? {}, colors = colors ?? [];
 
   final String id;
   String name;
@@ -24,7 +21,10 @@ class Deck {
   /// The card ids expanded to a list, sorted so the same deck always serialises the same way.
   List<String> get cardList {
     final keys = cards.keys.toList()..sort();
-    return [for (final k in keys) for (var i = 0; i < cards[k]!; i++) k];
+    return [
+      for (final k in keys)
+        for (var i = 0; i < cards[k]!; i++) k,
+    ];
   }
 
   List<String> problems(CardDatabase db) {
@@ -53,12 +53,12 @@ class Deck {
   Map<String, dynamic> toJson() => {'id': id, 'name': name, 'cards': cards, 'colors': colors.map((c) => c.symbol).toList(), 'isStarter': isStarter};
 
   factory Deck.fromJson(Map<String, dynamic> j) => Deck(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        cards: (j['cards'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
-        colors: (j['colors'] as List? ?? const []).map((e) => ManaColor.fromSymbol(e as String)).whereType<ManaColor>().toList(),
-        isStarter: j['isStarter'] as bool? ?? false,
-      );
+    id: j['id'] as String,
+    name: j['name'] as String,
+    cards: (j['cards'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
+    colors: (j['colors'] as List? ?? const []).map((e) => ManaColor.fromSymbol(e as String)).whereType<ManaColor>().toList(),
+    isStarter: j['isStarter'] as bool? ?? false,
+  );
 
   Deck copy({String? name, bool? isStarter}) => Deck(name: name ?? this.name, cards: Map.of(cards), colors: List.of(colors), isStarter: isStarter ?? false);
 }
@@ -98,6 +98,7 @@ class StarterDecks {
       if (c.colors.isEmpty) s -= 4;
       return s;
     }
+
     final ranked = List.of(pool)..sort((a, b) => score(a) != score(b) ? score(b) - score(a) : a.name.compareTo(b.name));
     final cards = <String, int>{};
     var total = 0;

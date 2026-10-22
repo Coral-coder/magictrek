@@ -36,6 +36,13 @@ late CardDatabase db;
   return (game, actions);
 }
 
+/// Declines every response window that is open.
+void passWindows(Game game) {
+  while (game.state.priority != null && game.state.pending == null) {
+    game.apply(const PassPriorityAction());
+  }
+}
+
 void main() {
   setUpAll(() {
     db = CardDatabase.fromJsonString(File('assets/cards.json').readAsStringSync());
@@ -269,7 +276,10 @@ void main() {
         final land = game.state.players[0].hand.firstWhere((id) => game.card(id)?.isLand == true);
         game.apply(PlayLandAction(land));
         game.apply(const EndTurnAction());
+        passWindows(game);
         game.apply(const EndTurnAction());
+        // Player 0 holds an instant, so they may respond at the end of the opponent's turn.
+        passWindows(game);
       }
       final spell = game.state.players[0].hand.firstWhere((id) => game.card(id)?.name == 'Burst Lightning');
       expect(game.canCast(spell, 0), isTrue);
@@ -278,6 +288,70 @@ void main() {
       expect(game.state.players[1].life, life - 4);
       expect(game.state.objects[spell]!.zone, Zone.graveyard);
       expect(game.state.permanentsOf(0).where((o) => o.tapped).length, 5);
+    });
+
+    /// Puts `n` untapped basic lands named `land` onto player `p`'s battlefield.
+    void giveLands(Game game, PlayerID p, String land, int n) {
+      for (var i = 0; i < n; i++) {
+        final id = game.newObject(cardID: db.byName(land)!.id, owner: p, zone: Zone.hand);
+        game.move(id, Zone.battlefield, controller: p);
+        game.state.objects[id]!.enteredTurn = -5;
+      }
+    }
+
+    test('a spell goes on the stack and the opponent can counter it', () {
+      final bear = db.distinctCards.firstWhere((c) => c.isCreature && c.manaCost == '{1}{W}' && db.parsed(c).fullySupported).id;
+      final refute = db.byName('Refute')!.id;
+      final game = makeGame([bear], [refute]);
+      giveLands(game, 0, 'Plains', 2);
+      giveLands(game, 1, 'Island', 3);
+      final spell = game.state.players[0].hand.firstWhere((id) => game.state.objects[id]!.cardID == bear);
+      game.apply(CastAction(spell));
+      expect(game.state.objects[spell]!.zone, Zone.stack);
+      expect(game.state.priority, 1, reason: 'the opponent holds a counterspell');
+      expect(game.state.playerToAct, 1);
+      final counter = game.state.players[1].hand.firstWhere((id) => game.state.objects[id]!.cardID == refute);
+      expect(game.canCast(counter, 1), isTrue);
+      expect(() => game.apply(const EndTurnAction()), throwsA(isA<GameError>()));
+      game.applyAs(CastAction(counter, targets: [spell]), 1);
+      passWindows(game);
+      // Refute: draw, then discard (player 1 chooses).
+      final pending = game.state.pending;
+      if (pending != null && pending.decision is DiscardToHandSizeDecision) {
+        game.apply(RespondAction(CardsResponse([game.state.players[1].hand.first])));
+      }
+      expect(game.state.objects[spell]!.zone, Zone.graveyard);
+      expect(game.state.objects[counter]!.zone, Zone.graveyard);
+      expect(game.state.stack, isEmpty);
+      expect(game.state.permanentsOf(0).where((o) => game.state.objects[o.id]!.cardID == bear), isEmpty);
+    });
+
+    test('counter unless its controller pays', () {
+      final bear = db.distinctCards.firstWhere((c) => c.isCreature && c.manaCost == '{1}{W}' && db.parsed(c).fullySupported).id;
+      final prime = db.byName('Consider the Prime Directive')!.id;
+      final game = makeGame([bear], [prime]);
+      giveLands(game, 0, 'Plains', 5);
+      giveLands(game, 1, 'Island', 3);
+      final spell = game.state.players[0].hand.firstWhere((id) => game.state.objects[id]!.cardID == bear);
+      game.apply(CastAction(spell));
+      final counter = game.state.players[1].hand.first;
+      game.applyAs(CastAction(counter, targets: [spell], mode: 0), 1);
+      passWindows(game);
+      expect(game.state.pending?.decision, isA<PayOrCounterDecision>());
+      game.apply(const RespondAction(YesResponse()));
+      passWindows(game);
+      expect(game.state.objects[spell]!.zone, Zone.battlefield, reason: 'paid {3}, so it resolved');
+      expect(game.state.permanentsOf(0).where((o) => o.tapped).length, 5);
+    });
+
+    test('no window opens for a player with nothing to cast', () {
+      final bear = db.distinctCards.firstWhere((c) => c.isCreature && c.manaCost == '{1}{W}' && db.parsed(c).fullySupported).id;
+      final game = makeGame([bear]);
+      giveLands(game, 0, 'Plains', 2);
+      final spell = game.state.players[0].hand.first;
+      game.apply(CastAction(spell));
+      expect(game.state.priority, isNull);
+      expect(game.state.objects[spell]!.zone, Zone.battlefield);
     });
 
     test('Station makes a Spacecraft a creature', () {

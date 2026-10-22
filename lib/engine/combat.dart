@@ -41,6 +41,7 @@ extension GameCombat on Game {
     for (final id in attackers) {
       fireTriggers(SimpleTrigger.attacks, id);
     }
+    state.turnContinuation.add(TurnStep.attackWindow);
     state.turnContinuation.add(TurnStep.blockers);
   }
 
@@ -52,11 +53,15 @@ extension GameCombat on Game {
     log(GameEvent('phase', phase: Phase.declareBlockers));
     final possible = state.permanentsOf(defender).any((b) => attackers.any((a) => canBlock(b.id, a)));
     if (attackers.isEmpty || !possible) {
-      state.turnContinuation.add(TurnStep.combatDamage);
+      state.turnContinuation.addAll(const [TurnStep.blockWindowActive, TurnStep.blockWindowDefender, TurnStep.combatDamage]);
       return;
     }
-    state.pending = PendingDecision(player: defender, decision: DeclareBlockersDecision(attackers), resume: Resume(source: null, controller: defender, effects: [], context: EffectContext(), kind: ResumeKind.blockers));
-    state.turnContinuation.add(TurnStep.combatDamage);
+    state.pending = PendingDecision(
+      player: defender,
+      decision: DeclareBlockersDecision(attackers),
+      resume: Resume(source: null, controller: defender, effects: [], context: EffectContext(), kind: ResumeKind.blockers),
+    );
+    state.turnContinuation.addAll(const [TurnStep.blockWindowActive, TurnStep.blockWindowDefender, TurnStep.combatDamage]);
   }
 
   void _acceptBlockers(Map<ObjectID, ObjectID> blocks) {
@@ -91,6 +96,7 @@ extension GameCombat on Game {
       final c = characteristics(id);
       return c.has(KeywordKind.firstStrike) || c.has(KeywordKind.doubleStrike);
     }
+
     final anyFirstStrike = attackers.any(fs) || state.combat.blockers.keys.any(fs);
     if (anyFirstStrike) {
       _dealCombatDamage(firstStrikeStep: true);
@@ -118,6 +124,7 @@ extension GameCombat on Game {
       if (firstStrikeStep) return c.has(KeywordKind.firstStrike) || c.has(KeywordKind.doubleStrike);
       return c.has(KeywordKind.doubleStrike) || !c.has(KeywordKind.firstStrike);
     }
+
     final pending = <(int, ObjectID, ObjectID?)>[];
     for (final a in attackers) {
       if (!strikesNow(a)) continue;

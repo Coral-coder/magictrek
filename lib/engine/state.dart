@@ -1,4 +1,5 @@
 import 'abilities.dart';
+import 'cards.dart';
 import 'props.dart';
 import 'rng.dart';
 import 'rules.dart';
@@ -6,7 +7,7 @@ import 'rules.dart';
 typedef PlayerID = int;
 typedef ObjectID = int;
 
-enum Zone { library, hand, battlefield, graveyard, exile }
+enum Zone { library, hand, battlefield, graveyard, exile, stack }
 
 /// A card in the game. Tokens are objects too, with `token` set.
 class GameObject {
@@ -36,7 +37,8 @@ class GameObject {
   int get chargeCounters => counters[CounterKind.charge] ?? 0;
 
   /// Canonical text for state digests.
-  String digest() => '$id|$cardID|$owner|${zone.name}|$controller|$tapped|$damage|${(counters.entries.map((e) => '${e.key.name}=${e.value}').toList()..sort()).join(',')}|$enteredTurn|$attachedTo|${untilEndOfTurn.map((e) => e.digest()).join(',')}|$frozen|$sacrificeAtEnd|${(activatedThisTurn.toList()..sort()).join(',')}|${exiledWithThis.join(',')}|$assimilated|$attacking|$blocking|${token == null ? '' : token!.props.toString()}';
+  String digest() =>
+      '$id|$cardID|$owner|${zone.name}|$controller|$tapped|$damage|${(counters.entries.map((e) => '${e.key.name}=${e.value}').toList()..sort()).join(',')}|$enteredTurn|$attachedTo|${untilEndOfTurn.map((e) => e.digest()).join(',')}|$frozen|$sacrificeAtEnd|${(activatedThisTurn.toList()..sort()).join(',')}|${exiledWithThis.join(',')}|$assimilated|$attacking|$blocking|${token == null ? '' : token!.props.toString()}';
 }
 
 sealed class TemporaryEffect with Props {
@@ -89,7 +91,8 @@ class PlayerState {
   int spellsCastThisTurn = 0;
   int lifeGainedThisTurn = 0;
 
-  String digest() => '$id|$name|$life|${library.join(',')}|${hand.join(',')}|${battlefield.join(',')}|${graveyard.join(',')}|${exile.join(',')}|$landsPlayedThisTurn|$noMaxHandSizeUntilNextTurn|$mulligans|$keptHand|$lost|$spellsCastThisTurn';
+  String digest() =>
+      '$id|$name|$life|${library.join(',')}|${hand.join(',')}|${battlefield.join(',')}|${graveyard.join(',')}|${exile.join(',')}|$landsPlayedThisTurn|$noMaxHandSizeUntilNextTurn|$mulligans|$keptHand|$lost|$spellsCastThisTurn';
 }
 
 enum Phase {
@@ -177,6 +180,14 @@ class ExploreDecision extends Decision {
   final ObjectID card, creature;
 }
 
+/// "Counter target spell unless its controller pays {3}": the spell's controller decides.
+class PayOrCounterDecision extends Decision {
+  const PayOrCounterDecision(this.prompt, this.cost, this.spell);
+  final String prompt;
+  final ManaCost cost;
+  final ObjectID spell;
+}
+
 class DiscoverDecision extends Decision {
   const DiscoverDecision(this.card);
   final ObjectID card;
@@ -239,7 +250,10 @@ class BlockersResponse extends DecisionResponse {
   @override
   List<Object?> get props => [blocks];
   @override
-  Map<String, dynamic> toJson() => {'t': 'blockers', 'b': {for (final e in blocks.entries) '${e.key}': e.value}};
+  Map<String, dynamic> toJson() => {
+    't': 'blockers',
+    'b': {for (final e in blocks.entries) '${e.key}': e.value},
+  };
 }
 
 class TargetsResponse extends DecisionResponse {
@@ -314,7 +328,7 @@ class DiscoverResponse extends DecisionResponse {
 
 /// The continuation of an interrupted effect sequence.
 class Resume {
-  Resume({required this.source, required this.controller, required this.effects, required this.context, required this.kind, this.modes, this.optionalEffects, this.sacrificeFilter});
+  Resume({required this.source, required this.controller, required this.effects, required this.context, required this.kind, this.modes, this.optionalEffects, this.sacrificeFilter, this.subject});
   ObjectID? source;
   PlayerID controller;
   List<Effect> effects;
@@ -323,9 +337,35 @@ class Resume {
   List<List<Effect>>? modes;
   List<Effect>? optionalEffects;
   Filter? sacrificeFilter;
+
+  /// The object a decision is about (the spell a pay-or-counter decision may counter).
+  ObjectID? subject;
 }
 
-enum ResumeKind { targets, mode, optional, surveil, scry, explore, discover, sacrifice, none, cleanup, blockers, mulligan }
+enum ResumeKind { targets, mode, optional, surveil, scry, explore, discover, sacrifice, none, cleanup, blockers, mulligan, payOrCounter }
+
+/// A spell waiting to resolve. Abilities resolve at once; only spells use the stack, which is
+/// what lets the other player respond to them (and counter them).
+class StackItem {
+  StackItem({required this.id, required this.controller, required this.effects, required this.context, this.fromGraveyard = false, this.x = 0});
+
+  /// The card object, now in Zone.stack.
+  final ObjectID id;
+  final PlayerID controller;
+
+  /// What an instant or sorcery does (the chosen mode already picked); empty for a permanent.
+  final List<Effect> effects;
+  final EffectContext context;
+
+  /// Cast with Beam me up: exiled instead of going to the graveyard.
+  final bool fromGraveyard;
+  final int x;
+
+  /// Whether the other player has had their chance to respond.
+  bool windowOffered = false;
+
+  String digest() => '$id:$controller:$fromGraveyard:$x:$windowOffered:${context.targets.join(',')}:${context.kicked}';
+}
 
 class PendingDecision {
   PendingDecision({required this.player, required this.decision, required this.resume});
@@ -341,6 +381,9 @@ class EffectContext {
   ObjectID? lastTouched;
   bool kicked = false;
   bool previousHappened = true;
+
+  /// The value chosen for X when the spell was cast.
+  int x = 0;
   ObjectID? triggeringObject;
 
   static ObjectID playerObject(PlayerID p) => -1 - p;
@@ -351,6 +394,7 @@ class EffectContext {
     ..lastTouched = lastTouched
     ..kicked = kicked
     ..previousHappened = previousHappened
+    ..x = x
     ..triggeringObject = triggeringObject;
 }
 
@@ -380,7 +424,7 @@ class GameEvent {
   String toString() => digest();
 }
 
-enum TurnStep { drawStep, main1, blockers, combatDamage, main2, endStep, cleanup, nextTurn }
+enum TurnStep { drawStep, main1, attackWindow, blockers, blockWindowActive, blockWindowDefender, combatDamage, main2, endStep, endWindow, cleanup, nextTurn }
 
 class GameState {
   GameState({required List<String> playerNames, List<bool>? bots, required int seed}) : rng = SeededRng(seed) {
@@ -404,6 +448,13 @@ class GameState {
   PlayerID startingPlayer = 0;
   List<TurnStep> turnContinuation = [];
 
+  /// Spells cast and not yet resolved, last one on top.
+  List<StackItem> stack = [];
+
+  /// The player who may respond right now (cast an instant, or pass), when it isn't simply the
+  /// active player's turn to act.
+  PlayerID? priority;
+
   bool get isOver => winner != null;
   int get playerCount => players.length;
   PlayerID opponentOf(PlayerID p) => (p + 1) % players.length;
@@ -413,18 +464,23 @@ class GameState {
     if (isOver) return null;
     final p = pending;
     if (p != null) return p.player;
-    return activePlayer;
+    return priority ?? activePlayer;
   }
 
   GameObject? object(ObjectID id) => objects[id];
-  List<GameObject> permanentsOf(PlayerID p) => [for (final id in players[p].battlefield) if (objects[id] != null) objects[id]!];
+  List<GameObject> permanentsOf(PlayerID p) => [
+    for (final id in players[p].battlefield)
+      if (objects[id] != null) objects[id]!,
+  ];
   List<GameObject> get allPermanents => [for (final p in players) ...permanentsOf(p.id)];
 
   /// A canonical fingerprint of everything that matters for lockstep: two devices that agree on
   /// this after each action are in sync.
   String digest() {
     final b = StringBuffer();
-    b.writeln('turn=$turn active=$activePlayer phase=${phase.name} rng=${rng.state} next=$nextObjectID winner=$winner started=$started actions=$actionCount pending=${pending?.decision.runtimeType} rules=${rules.digest()}');
+    b.writeln(
+      'turn=$turn active=$activePlayer phase=${phase.name} rng=${rng.state} next=$nextObjectID winner=$winner started=$started actions=$actionCount pending=${pending?.decision.runtimeType} rules=${rules.digest()}',
+    );
     for (final p in players) {
       b.writeln(p.digest());
     }
@@ -434,6 +490,7 @@ class GameState {
     }
     b.writeln('combat=${combat.attackers.join(',')}|${(combat.blockers.entries.map((e) => '${e.key}>${e.value}').toList()..sort()).join(',')}|${combat.defender}');
     b.writeln('cont=${turnContinuation.map((s) => s.name).join(',')}');
+    b.writeln('stack=${stack.map((s) => s.digest()).join(';')} priority=$priority');
     return b.toString();
   }
 }

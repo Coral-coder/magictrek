@@ -2,7 +2,18 @@ part of 'game.dart';
 
 /// What a permanent is right now, with counters, pumps, attachments and statics applied.
 class Characteristics {
-  Characteristics({required this.name, required this.power, required this.toughness, required this.keywords, required this.isCreature, required this.isArtifact, required this.isEnchantment, required this.isLand, required this.isSpacecraft, required this.subtypes});
+  Characteristics({
+    required this.name,
+    required this.power,
+    required this.toughness,
+    required this.keywords,
+    required this.isCreature,
+    required this.isArtifact,
+    required this.isEnchantment,
+    required this.isLand,
+    required this.isSpacecraft,
+    required this.subtypes,
+  });
   String name;
   int power, toughness;
   Set<Keyword> keywords;
@@ -13,7 +24,8 @@ class Characteristics {
   bool has(KeywordKind kind) => keywords.any((k) => k.kind == kind);
   int get wardCost => keywords.where((k) => k.kind == KeywordKind.ward).map((k) => k.value).firstOrNull ?? 0;
 
-  static Characteristics empty() => Characteristics(name: '?', power: 0, toughness: 0, keywords: {}, isCreature: false, isArtifact: false, isEnchantment: false, isLand: false, isSpacecraft: false, subtypes: {});
+  static Characteristics empty() =>
+      Characteristics(name: '?', power: 0, toughness: 0, keywords: {}, isCreature: false, isArtifact: false, isEnchantment: false, isLand: false, isSpacecraft: false, subtypes: {});
 }
 
 class TargetRequirement {
@@ -52,9 +64,31 @@ extension GameQueries on Game {
     Characteristics c;
     final t = o.token;
     if (t != null && card == null) {
-      c = Characteristics(name: t.name, power: t.power, toughness: t.toughness, keywords: Set.of(t.keywords), isCreature: t.isCreature, isArtifact: t.isArtifact, isEnchantment: false, isLand: false, isSpacecraft: false, subtypes: Set.of(t.subtypes));
+      c = Characteristics(
+        name: t.name,
+        power: t.power,
+        toughness: t.toughness,
+        keywords: Set.of(t.keywords),
+        isCreature: t.isCreature,
+        isArtifact: t.isArtifact,
+        isEnchantment: false,
+        isLand: false,
+        isSpacecraft: false,
+        subtypes: Set.of(t.subtypes),
+      );
     } else if (card != null && parsedCard != null) {
-      c = Characteristics(name: card.name, power: card.basePower, toughness: card.baseToughness, keywords: Set.of(parsedCard.keywords), isCreature: card.isCreature, isArtifact: card.isArtifact, isEnchantment: card.isEnchantment, isLand: card.isLand, isSpacecraft: card.isSpacecraft, subtypes: Set.of(card.subtypes));
+      c = Characteristics(
+        name: card.name,
+        power: card.basePower,
+        toughness: card.baseToughness,
+        keywords: Set.of(parsedCard.keywords),
+        isCreature: card.isCreature,
+        isArtifact: card.isArtifact,
+        isEnchantment: card.isEnchantment,
+        isLand: card.isLand,
+        isSpacecraft: card.isSpacecraft,
+        subtypes: Set.of(card.subtypes),
+      );
       if (t != null) c.keywords.addAll(t.keywords);
       if (card.isSpacecraft) {
         final threshold = parsedCard.stationThreshold ?? card.stationThreshold;
@@ -198,6 +232,7 @@ extension GameQueries on Game {
         if (!o.isToken) return false;
       case FilterKind.creatureCardInGraveyard:
       case FilterKind.basicLandCardInLibrary:
+      case FilterKind.spell:
         return false;
     }
     if (f.attacking && o.attacking == null && !f.blocking) return false;
@@ -226,6 +261,18 @@ extension GameQueries on Game {
         out.add(EffectContext.playerObject(p.id));
       }
       if (f.isPlayerFilter) return out;
+    }
+    if (f.kind == FilterKind.spell) {
+      for (final item in state.stack) {
+        if (item.id == source) continue;
+        final c = card(item.id);
+        if (c == null) continue;
+        if (f.maxManaValue != null && c.manaValue + item.x > f.maxManaValue!) continue;
+        if (f.controller == Controller.you && item.controller != controller) continue;
+        if (f.controller == Controller.opponent && item.controller == controller) continue;
+        out.add(item.id);
+      }
+      return out;
     }
     if (f.kind == FilterKind.creatureCardInGraveyard) {
       for (final p in state.players) {
@@ -375,22 +422,48 @@ extension GameQueries on Game {
 
   /// Whether a card in hand can be cast now (timing + mana), ignoring targets.
   bool canCast(ObjectID id, PlayerID p) {
-    if (state.pending != null || state.winner != null || state.activePlayer != p) return false;
+    if (state.pending != null || state.winner != null) return false;
     final o = state.objects[id];
     final card = o == null ? null : cardOf(o);
-    if (o == null || o.zone != Zone.hand || card == null || card.isLand) return false;
-    final parsed = db.parsed(card);
-    final instantSpeed = card.isInstant || parsed.has(KeywordKind.flash);
-    if (!state.phase.isMain && !instantSpeed) return false;
-    const combatPhases = {Phase.beginCombat, Phase.declareAttackers, Phase.declareBlockers, Phase.combatDamage, Phase.endCombat, Phase.end};
-    if (!state.phase.isMain && !combatPhases.contains(state.phase)) return false;
+    if (o == null || o.zone != Zone.hand || o.owner != p || card == null || card.isLand) return false;
+    if (!_timingAllows(card, p)) return false;
     if (!canPay(card.cost, p)) return false;
-    if (parsed.isAura && legalTargets(Filter.creature, p, id).isEmpty) return false;
+    if (db.parsed(card).isAura && legalTargets(Filter.creature, p, id).isEmpty) return false;
     return true;
   }
 
+  /// Whether `p` holds an instant or flash card they could cast in response right now, with a
+  /// target for it. Windows to respond only open when this is true, so nobody is asked to pass
+  /// when they have nothing.
+  bool hasResponses(PlayerID p) {
+    if (state.players[p].lost) return false;
+    for (final id in state.players[p].hand) {
+      final card = this.card(id);
+      if (card == null || card.isLand) continue;
+      final parsed = db.parsed(card);
+      if (!card.isInstant && !parsed.has(KeywordKind.flash)) continue;
+      if (!canPay(card.cost, p)) continue;
+      if (card.isInstant && parsed.spellEffects.isEmpty) continue;
+      if (_hasTargetsFor(card, p, id)) return true;
+    }
+    return false;
+  }
+
+  /// Whether every required target of the card (in at least one mode) has a legal choice.
+  bool _hasTargetsFor(Card card, PlayerID p, ObjectID id) {
+    final parsed = db.parsed(card);
+    if (parsed.isAura) return legalTargets(Filter.creature, p, id).isNotEmpty;
+    final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
+    final modes = modal == null ? <int?>[null] : List<int?>.generate(modal.modes.length, (i) => i);
+    for (final m in modes) {
+      final reqs = targetRequirementsForCard(card, m);
+      if (reqs.every((r) => r.optional || legalTargets(r.filter, p, id).isNotEmpty)) return true;
+    }
+    return false;
+  }
+
   bool canPlayLand(ObjectID id, PlayerID p) {
-    if (state.pending != null || state.winner != null || state.activePlayer != p || !state.phase.isMain) return false;
+    if (state.pending != null || state.winner != null || state.priority != null || state.stack.isNotEmpty || state.activePlayer != p || !state.phase.isMain) return false;
     final o = state.objects[id];
     final card = o == null ? null : cardOf(o);
     if (o == null || o.zone != Zone.hand || card == null || !card.isLand) return false;
@@ -416,6 +489,7 @@ extension GameQueries on Game {
     void add(Target t) {
       if (t is ChosenTarget) out.add(TargetRequirement(t.filter, t.count, t.optional));
     }
+
     for (final e in effects) {
       switch (e) {
         case Damage x:
@@ -465,6 +539,8 @@ extension GameQueries on Game {
         case AssimilateExiledOrExile x:
           add(x.target);
         case CopyToken x:
+          add(x.target);
+        case CounterSpell x:
           add(x.target);
         case CreateTokens x:
           add(x.target);

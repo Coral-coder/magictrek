@@ -4,14 +4,7 @@ import 'props.dart';
 /// replays with the rules it was started under and both phones of a linked match play by the
 /// host's settings; they are part of the state digest too.
 class Rules with Props {
-  const Rules({
-    this.startingLife = 20,
-    this.handSize = 7,
-    this.londonMulligan = true,
-    this.freeMulligan = false,
-    this.firstPlayerDraws = false,
-    this.maxHandSize = true,
-  });
+  const Rules({this.startingLife = 20, this.handSize = 7, this.londonMulligan = true, this.freeMulligan = false, this.firstPlayerDraws = false, this.maxHandSize = true});
 
   static const standard = Rules();
 
@@ -35,22 +28,15 @@ class Rules with Props {
   final bool maxHandSize;
 
   Rules copyWith({int? startingLife, int? handSize, bool? londonMulligan, bool? freeMulligan, bool? firstPlayerDraws, bool? maxHandSize}) => Rules(
-        startingLife: startingLife ?? this.startingLife,
-        handSize: handSize ?? this.handSize,
-        londonMulligan: londonMulligan ?? this.londonMulligan,
-        freeMulligan: freeMulligan ?? this.freeMulligan,
-        firstPlayerDraws: firstPlayerDraws ?? this.firstPlayerDraws,
-        maxHandSize: maxHandSize ?? this.maxHandSize,
-      );
+    startingLife: startingLife ?? this.startingLife,
+    handSize: handSize ?? this.handSize,
+    londonMulligan: londonMulligan ?? this.londonMulligan,
+    freeMulligan: freeMulligan ?? this.freeMulligan,
+    firstPlayerDraws: firstPlayerDraws ?? this.firstPlayerDraws,
+    maxHandSize: maxHandSize ?? this.maxHandSize,
+  );
 
-  Map<String, dynamic> toJson() => {
-        'life': startingLife,
-        'hand': handSize,
-        'london': londonMulligan,
-        'freeMulligan': freeMulligan,
-        'firstDraws': firstPlayerDraws,
-        'maxHand': maxHandSize,
-      };
+  Map<String, dynamic> toJson() => {'life': startingLife, 'hand': handSize, 'london': londonMulligan, 'freeMulligan': freeMulligan, 'firstDraws': firstPlayerDraws, 'maxHand': maxHandSize};
 
   /// Missing keys take the standard value, so older saves and peers still load.
   static Rules fromJson(Map<String, dynamic>? j) {
