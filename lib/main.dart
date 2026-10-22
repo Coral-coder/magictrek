@@ -87,16 +87,7 @@ class _Loading extends StatelessWidget {
   const _Loading();
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: LCARS.black,
-    body: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('MAGICTREK', style: LCARS.title),
-          const SizedBox(height: 16),
-          const ScanLine(width: 140),
-        ],
-      ),
-    ),
-  );
+        backgroundColor: LCARS.black,
+        body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text('MAGICTREK', style: LCARS.title), const SizedBox(height: 16), const ScanLine(width: 140)])),
+      );
 }

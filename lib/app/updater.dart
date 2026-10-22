@@ -21,7 +21,13 @@ class ReleaseInfo {
     final code = j['versionCode'];
     final apk = j['apk'];
     if (code is! num || apk is! String) return null;
-    return ReleaseInfo(versionName: (j['versionName'] ?? '').toString(), versionCode: code.toInt(), tag: (j['tag'] ?? '').toString(), apkUrl: apk, notes: (j['notes'] ?? '').toString());
+    return ReleaseInfo(
+      versionName: (j['versionName'] ?? '').toString(),
+      versionCode: code.toInt(),
+      tag: (j['tag'] ?? '').toString(),
+      apkUrl: apk,
+      notes: (j['notes'] ?? '').toString(),
+    );
   }
 
   String get label => versionName.isEmpty ? 'build $versionCode' : '$versionName (build $versionCode)';
@@ -53,10 +59,8 @@ class Updater extends ChangeNotifier {
   bool downloading = false;
   double progress = 0;
   String? error;
-
   /// Download a newer build as soon as it is seen, so installing is one tap.
   bool autoDownload = true;
-
   /// Set once the APK of [available] is in the cache and ready to install.
   File? downloaded;
   DateTime? _lastCheck;

@@ -15,14 +15,21 @@ import 'transport.dart';
 /// events, so a game can continue days later and a reinstalled app can catch up from history.
 const relayEventKind = 4042;
 
-const defaultRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.nostr.band'];
+const defaultRelays = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+  'wss://relay.nostr.band',
+];
 
 String roomTag(String code) => sha256.convert(utf8.encode('magictrek:room:${code.toUpperCase()}')).toString().substring(0, 32);
 
 /// A keystream cipher with an HMAC tag, both from the shared code. Keeps game traffic private
 /// from relay operators; the engine, not secrecy, is what makes the game fair.
 class RoomCipher {
-  RoomCipher(String code) : _key = sha256.convert(utf8.encode('magictrek:key:${code.toUpperCase()}')).bytes, _mac = sha256.convert(utf8.encode('magictrek:mac:${code.toUpperCase()}')).bytes;
+  RoomCipher(String code)
+      : _key = sha256.convert(utf8.encode('magictrek:key:${code.toUpperCase()}')).bytes,
+        _mac = sha256.convert(utf8.encode('magictrek:mac:${code.toUpperCase()}')).bytes;
   final List<int> _key, _mac;
   final _rand = Random.secure();
 
@@ -102,30 +109,19 @@ class RelayTransport implements Transport {
     try {
       final ch = WebSocketChannel.connect(Uri.parse(url));
       _channels[url] = ch;
-      ch.ready
-          .then((_) {
-            if (_closed) return;
-            _ready.add(url);
-            _relayStatus.add({for (final r in relays) r: _ready.contains(r)});
-            _set(LinkState.connected);
-            final req = nostr.Request(
-              subscriptionId: _subId,
-              filters: [
-                nostr.Filter(
-                  kinds: const [relayEventKind],
-                  tagFilters: {
-                    't': [_room],
-                  },
-                  limit: 1000,
-                ),
-              ],
-            );
-            ch.sink.add(req.serialize());
-            for (final m in _outbox) {
-              ch.sink.add(m);
-            }
-          })
-          .catchError((_) => _retry(url));
+      ch.ready.then((_) {
+        if (_closed) return;
+        _ready.add(url);
+        _relayStatus.add({for (final r in relays) r: _ready.contains(r)});
+        _set(LinkState.connected);
+        final req = nostr.Request(subscriptionId: _subId, filters: [
+          nostr.Filter(kinds: const [relayEventKind], tagFilters: {'t': [_room]}, limit: 1000),
+        ]);
+        ch.sink.add(req.serialize());
+        for (final m in _outbox) {
+          ch.sink.add(m);
+        }
+      }).catchError((_) => _retry(url));
       ch.stream.listen(_onRelayMessage, onError: (_) => _retry(url), onDone: () => _retry(url), cancelOnError: true);
     } catch (_) {
       _retry(url);
@@ -186,14 +182,9 @@ class RelayTransport implements Transport {
   @override
   Future<void> send(String message) async {
     if (_closed) return;
-    final event = nostr.Event.from(
-      kind: relayEventKind,
-      content: _cipher.encrypt(message),
-      secretKey: secretKey,
-      tags: [
-        ['t', _room],
-      ],
-    );
+    final event = nostr.Event.from(kind: relayEventKind, content: _cipher.encrypt(message), secretKey: secretKey, tags: [
+      ['t', _room]
+    ]);
     final frame = jsonEncode(['EVENT', jsonDecode(event.serialize())[1]]);
     _outbox.add(frame);
     if (_outbox.length > 400) _outbox.removeAt(0);

@@ -70,20 +70,18 @@ Future<bool> requestBluetoothPermissions() async {
   try {
     sdk = await const MethodChannel('magictrek/updater').invokeMethod<int>('sdkInt') ?? sdk;
   } catch (_) {}
-  final wanted = sdk >= 31 ? [Permission.bluetoothScan, Permission.bluetoothConnect, Permission.bluetoothAdvertise] : [Permission.locationWhenInUse];
+  final wanted = sdk >= 31
+      ? [Permission.bluetoothScan, Permission.bluetoothConnect, Permission.bluetoothAdvertise]
+      : [Permission.locationWhenInUse];
   final results = await wanted.request();
   final refused = results.entries.where((e) => !(e.value.isGranted || e.value.isLimited)).toList();
   if (refused.isEmpty) return true;
-  final names = refused
-      .map(
-        (e) => switch (e.key) {
-          Permission.bluetoothScan => 'scan',
-          Permission.bluetoothConnect => 'connect',
-          Permission.bluetoothAdvertise => 'advertise',
-          _ => 'location',
-        },
-      )
-      .join(', ');
+  final names = refused.map((e) => switch (e.key) {
+        Permission.bluetoothScan => 'scan',
+        Permission.bluetoothConnect => 'connect',
+        Permission.bluetoothAdvertise => 'advertise',
+        _ => 'location',
+      }).join(', ');
   final settings = refused.any((e) => e.value.isPermanentlyDenied) ? ' Allow "Nearby devices" for MagicTrek in Android Settings → Apps.' : '';
   throw StateError('Bluetooth permission refused ($names).$settings');
 }
@@ -130,13 +128,11 @@ class _BleHostTransport implements Transport {
   @override
   Future<void> send(String message) {
     if (_current != LinkState.connected) return Future.value();
-    _sending = _sending
-        .then((_) async {
-          for (final chunk in _framer.split(message, _chunkSize)) {
-            await _manager.notifyCharacteristic(_central, _characteristic, value: chunk);
-          }
-        })
-        .catchError((_) => setState(LinkState.failed));
+    _sending = _sending.then((_) async {
+      for (final chunk in _framer.split(message, _chunkSize)) {
+        await _manager.notifyCharacteristic(_central, _characteristic, value: chunk);
+      }
+    }).catchError((_) => setState(LinkState.failed));
     return _sending;
   }
 
@@ -170,40 +166,34 @@ class BleHost implements HostLink {
       descriptors: [],
     );
     await _manager.addService(GATTService(uuid: bleServiceUuid, isPrimary: true, includedServices: [], characteristics: [characteristic]));
-    _subs.add(
-      _manager.characteristicWriteRequested.listen((e) async {
+    _subs.add(_manager.characteristicWriteRequested.listen((e) async {
+      try {
+        await _manager.respondWriteRequest(e.request);
+      } catch (_) {}
+      final t = _transports[e.central.uuid.toString()];
+      if (t != null) t.receive(e.request.value);
+    }));
+    _subs.add(_manager.characteristicNotifyStateChanged.listen((e) async {
+      final key = e.central.uuid.toString();
+      if (e.state) {
+        var chunk = 20;
         try {
-          await _manager.respondWriteRequest(e.request);
+          chunk = await _manager.getMaximumNotifyLength(e.central);
         } catch (_) {}
-        final t = _transports[e.central.uuid.toString()];
-        if (t != null) t.receive(e.request.value);
-      }),
-    );
-    _subs.add(
-      _manager.characteristicNotifyStateChanged.listen((e) async {
-        final key = e.central.uuid.toString();
-        if (e.state) {
-          var chunk = 20;
-          try {
-            chunk = await _manager.getMaximumNotifyLength(e.central);
-          } catch (_) {}
-          final t = _BleHostTransport(_manager, e.central, characteristic, chunk);
-          _transports[key] = t;
-          _connections.add(t);
-        } else {
-          _transports.remove(key)?.setState(LinkState.closed);
-        }
-      }),
-    );
+        final t = _BleHostTransport(_manager, e.central, characteristic, chunk);
+        _transports[key] = t;
+        _connections.add(t);
+      } else {
+        _transports.remove(key)?.setState(LinkState.closed);
+      }
+    }));
     // Android reports a central dropping off; Core Bluetooth has no such event for a
     // peripheral (the getter throws), and a disconnect shows up above as the central's
     // notifications being switched off, which closes the link just the same.
     try {
-      _subs.add(
-        _manager.connectionStateChanged.listen((e) {
-          if (e.state == ConnectionState.disconnected) _transports.remove(e.central.uuid.toString())?.setState(LinkState.closed);
-        }),
-      );
+      _subs.add(_manager.connectionStateChanged.listen((e) {
+        if (e.state == ConnectionState.disconnected) _transports.remove(e.central.uuid.toString())?.setState(LinkState.closed);
+      }));
     } on UnsupportedError {
       // iOS and macOS.
     }
@@ -226,18 +216,14 @@ class BleHost implements HostLink {
 /// The guest side: scans for hosts and connects to one.
 class _BleGuestTransport implements Transport {
   _BleGuestTransport(this._manager, this._peripheral, this._characteristic, this._chunkSize) {
-    _subs.add(
-      _manager.characteristicNotified.listen((e) {
-        if (e.peripheral.uuid != _peripheral.uuid || e.characteristic.uuid != bleDataUuid) return;
-        final m = _reassembler.add(e.value);
-        if (m != null) _messages.add(m);
-      }),
-    );
-    _subs.add(
-      _manager.connectionStateChanged.listen((e) {
-        if (e.peripheral.uuid == _peripheral.uuid && e.state == ConnectionState.disconnected) _set(LinkState.closed);
-      }),
-    );
+    _subs.add(_manager.characteristicNotified.listen((e) {
+      if (e.peripheral.uuid != _peripheral.uuid || e.characteristic.uuid != bleDataUuid) return;
+      final m = _reassembler.add(e.value);
+      if (m != null) _messages.add(m);
+    }));
+    _subs.add(_manager.connectionStateChanged.listen((e) {
+      if (e.peripheral.uuid == _peripheral.uuid && e.state == ConnectionState.disconnected) _set(LinkState.closed);
+    }));
   }
   final CentralManager _manager;
   final Peripheral _peripheral;
@@ -269,13 +255,11 @@ class _BleGuestTransport implements Transport {
   @override
   Future<void> send(String message) {
     if (_current != LinkState.connected) return Future.value();
-    _sending = _sending
-        .then((_) async {
-          for (final chunk in _framer.split(message, _chunkSize)) {
-            await _manager.writeCharacteristic(_peripheral, _characteristic, value: chunk, type: GATTCharacteristicWriteType.withResponse);
-          }
-        })
-        .catchError((_) => _set(LinkState.failed));
+    _sending = _sending.then((_) async {
+      for (final chunk in _framer.split(message, _chunkSize)) {
+        await _manager.writeCharacteristic(_peripheral, _characteristic, value: chunk, type: GATTCharacteristicWriteType.withResponse);
+      }
+    }).catchError((_) => _set(LinkState.failed));
     return _sending;
   }
 

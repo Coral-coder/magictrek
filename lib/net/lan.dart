@@ -11,18 +11,14 @@ const _magic = 'MAGICTREK1';
 
 class TcpTransport implements Transport {
   TcpTransport(this._socket) {
-    _socket
-        .cast<List<int>>()
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen(
-          (line) {
-            if (line.isNotEmpty) _messages.add(line);
-          },
-          onDone: () => _set(LinkState.closed),
-          onError: (_) => _set(LinkState.failed),
-          cancelOnError: true,
-        );
+    _socket.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen(
+      (line) {
+        if (line.isNotEmpty) _messages.add(line);
+      },
+      onDone: () => _set(LinkState.closed),
+      onError: (_) => _set(LinkState.failed),
+      cancelOnError: true,
+    );
   }
 
   final Socket _socket;
@@ -90,7 +86,6 @@ class LanHost implements HostLink {
         _beacon?.send(payload, InternetAddress('255.255.255.255'), lanDiscoveryPort);
       } catch (_) {}
     }
-
     announce();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => announce());
   }
