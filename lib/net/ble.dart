@@ -165,9 +165,16 @@ class BleHost implements HostLink {
         _transports.remove(key)?.setState(LinkState.closed);
       }
     }));
-    _subs.add(_manager.connectionStateChanged.listen((e) {
-      if (e.state == ConnectionState.disconnected) _transports.remove(e.central.uuid.toString())?.setState(LinkState.closed);
-    }));
+    // Android reports a central dropping off; Core Bluetooth has no such event for a
+    // peripheral (the getter throws), and a disconnect shows up above as the central's
+    // notifications being switched off, which closes the link just the same.
+    try {
+      _subs.add(_manager.connectionStateChanged.listen((e) {
+        if (e.state == ConnectionState.disconnected) _transports.remove(e.central.uuid.toString())?.setState(LinkState.closed);
+      }));
+    } on UnsupportedError {
+      // iOS and macOS.
+    }
     await _manager.startAdvertising(Advertisement(name: '$_namePrefix$name', serviceUUIDs: [bleServiceUuid]));
   }
 
