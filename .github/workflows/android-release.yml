@@ -202,6 +202,7 @@ jobs:
             echo "- **Install**: download \`MagicTrek.apk\` below on the phone and open it (allow installs from your browser when asked)."
             echo "- **Always the newest build**: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/MagicTrek.apk"
             echo "- Installed copies offer this build as an update on launch."
+            echo "- **iPhone**: the same commit goes to TestFlight; join the beta at https://testflight.apple.com/join/kmHpM5dq"
             if [ "$SIGNED" = debug ]; then
               echo "- Signed with a throwaway debug key (no \`ANDROID_KEYSTORE_*\` secrets): uninstall the previous build before installing this one."
             fi
