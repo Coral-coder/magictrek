@@ -23,10 +23,14 @@ class Idle extends Interaction {
 }
 
 class Targeting extends Interaction {
-  const Targeting({required this.requirements, required this.chosen, required this.purpose});
+  const Targeting({required this.requirements, required this.chosen, required this.purpose, this.inCurrent = 0});
+  /// The requirements still to fill; the first is the one being chosen now.
   final List<TargetRequirement> requirements;
+  /// Every target chosen so far, in order.
   final List<ObjectID> chosen;
   final Purpose purpose;
+  /// How many of [chosen] belong to the current requirement ("one or two target creatures").
+  final int inCurrent;
 }
 
 class Attacking extends Interaction {
@@ -398,16 +402,10 @@ class _GameScreenState extends State<GameScreen> {
         final req = t.requirements.firstOrNull;
         if (req == null || !game.legalTargets(req.filter, me, null).contains(id) || t.chosen.contains(id)) return;
         final chosen = [...t.chosen, id];
-        if (chosen.length >= req.count) {
-          final rest = t.requirements.sublist(1);
-          if (rest.isEmpty) {
-            interaction = Targeting(requirements: t.requirements, chosen: chosen, purpose: t.purpose);
-            finishTargeting();
-          } else {
-            setState(() => interaction = Targeting(requirements: rest, chosen: chosen, purpose: t.purpose));
-          }
+        if (t.inCurrent + 1 >= req.count) {
+          nextTargetRequirement(t, chosen);
         } else {
-          setState(() => interaction = Targeting(requirements: t.requirements, chosen: chosen, purpose: t.purpose));
+          setState(() => interaction = Targeting(requirements: t.requirements, chosen: chosen, purpose: t.purpose, inCurrent: t.inCurrent + 1));
         }
       case Attacking a:
         if (obj.controller != me || !game.canAttack(id)) return;
@@ -566,7 +564,11 @@ class _GameScreenState extends State<GameScreen> {
   void chooseTargetPlayer(PlayerID p) {
     final t = interaction;
     if (t is! Targeting) return;
-    final chosen = [...t.chosen, EffectContext.playerObject(p)];
+    nextTargetRequirement(t, [...t.chosen, EffectContext.playerObject(p)]);
+  }
+
+  /// The current requirement is filled (or the player is done with it): on to the next, or cast.
+  void nextTargetRequirement(Targeting t, List<ObjectID> chosen) {
     final rest = t.requirements.sublist(1);
     if (rest.isEmpty) {
       interaction = Targeting(requirements: t.requirements, chosen: chosen, purpose: t.purpose);
@@ -1362,7 +1364,7 @@ class _GameScreenState extends State<GameScreen> {
               const SizedBox(width: 4),
               _small(state.players[them].name, () => chooseTargetPlayer(them), color: LCARS.alert, width: 90),
             ],
-            if (req != null && (req.optional || t.chosen.isNotEmpty)) ...[const SizedBox(width: 4), _small('Done', finishTargeting, color: LCARS.gold, width: 64)],
+            if (req != null && (req.optional || t.inCurrent > 0)) ...[const SizedBox(width: 4), _small(t.requirements.length > 1 ? 'Next' : 'Done', () => nextTargetRequirement(t, t.chosen), color: LCARS.gold, width: 64)],
             const SizedBox(width: 4),
             _small(
               'Cancel',
@@ -1862,7 +1864,7 @@ class _GameScreenState extends State<GameScreen> {
       _ => 'permanent',
     };
     final who = req.filter.controller == Controller.opponent ? ' an opponent controls' : (req.filter.controller == Controller.you ? ' you control' : '');
-    return 'Tap target $what$who${req.count > 1 ? ' (${chosen.length}/${req.count})' : ''}';
+    return 'Tap ${req.optional ? 'up to one ' : ''}target $what$who${req.count > 1 ? ' (up to ${req.count})' : ''}';
   }
 
   String zoneLabel(ObjectID id) => switch (state.objects[id]?.zone) {

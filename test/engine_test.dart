@@ -510,5 +510,59 @@ void main() {
       expect(game.state.objects[crew], isNull, reason: 'the token was sacrificed');
       expect(game.state.objects[enemy]!.zone, Zone.graveyard, reason: '5/6 with -6/-6 dies');
     });
+    test('Gumato taps for three green mana; leftovers stay in the pool', () {
+      final game = makeGame([db.byName('Battle-Scarred Survivalist')!.id]);
+      final gumato = putOnTable(game, 0, 'Gumato');
+      expect(game.canPay(ManaCost.parse('{G}{G}{G}'), 0), isTrue);
+      expect(game.canPay(ManaCost.parse('{G}{G}{G}{G}'), 0), isFalse);
+      // A {1}{B} spell can't be paid by green mana alone.
+      final spell = game.state.players[0].hand.first;
+      expect(game.canCast(spell, 0), isFalse);
+      giveLands(game, 0, 'Swamp', 1);
+      game.apply(CastAction(spell));
+      passWindows(game);
+      expect(game.state.objects[gumato]!.tapped, isTrue);
+      expect(game.state.players[0].manaPool['G'], 2, reason: 'one green paid the generic, two float');
+    });
+
+    test('Shields Up! and Run Amok ask for one target', () {
+      for (final name in ['Shields Up!', 'Run Amok', 'Dathon and Picard at El-Adrel']) {
+        final card = db.byName(name)!;
+        final game = makeGame([]);
+        expect(game.targetRequirementsForCard(card, name.startsWith('Dathon') ? 0 : null).length, 1, reason: name);
+      }
+    });
+
+    test('Pure Energy splits its counters between two creatures', () {
+      final game = makeGame([db.byName('Pure Energy')!.id]);
+      giveLands(game, 0, 'Plains', 2);
+      final a = putOnTable(game, 0, 'Head of Security');
+      final b = putOnTable(game, 0, 'Sickbay Orderly');
+      game.apply(CastAction(game.state.players[0].hand.first, targets: [a, b]));
+      passWindows(game);
+      expect(game.state.objects[a]!.counters[CounterKind.plusOne], 1);
+      expect(game.state.objects[b]!.counters[CounterKind.plusOne], 1);
+    });
+
+    test('Romulan Bird-of-Prey charges itself when a noncreature spell is cast', () {
+      final game = makeGame([db.byName('Gin\'tak Charge')!.id]);
+      giveLands(game, 0, 'Mountain', 1);
+      final ship = putOnTable(game, 0, 'Romulan Bird-of-Prey');
+      game.apply(CastAction(game.state.players[0].hand.first, targets: [EffectContext.playerObject(1)]));
+      passWindows(game);
+      expect(game.state.objects[ship]!.chargeCounters, 2);
+    });
+
+    test('Marooned can enchant an artifact', () {
+      final game = makeGame([db.byName('Marooned')!.id]);
+      giveLands(game, 0, 'Island', 1);
+      final relic = putOnTable(game, 1, 'Replicator');
+      final aura = game.state.players[0].hand.first;
+      expect(game.canCast(aura, 0), isTrue);
+      game.apply(CastAction(aura, targets: [relic]));
+      passWindows(game);
+      if (game.state.pending?.decision is ChooseOptionalDecision) game.apply(const RespondAction(NoResponse()));
+      expect(game.state.objects[aura]!.attachedTo, relic);
+    });
   });
 }

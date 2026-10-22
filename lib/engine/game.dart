@@ -623,6 +623,9 @@ class Game {
       final beam = parsed.beamMeUp;
       final b = state.objects[beamUpBounce];
       if (beam == null || o.owner != p || b == null || b.zone != Zone.battlefield || b.controller != p || !characteristics(beamUpBounce).isCreature) throw GameError("Can't beam that up");
+      if (state.allPermanents.any((a) => a.attachedTo == beamUpBounce && staticsOf(a).contains(const SimpleStatic(SimpleStaticKind.attachedCantBeBeamedUp)))) {
+        throw GameError("${name(beamUpBounce)} can't be beamed up");
+      }
       if (!_timingAllows(card, p)) throw GameError("Can't cast that now");
       cost = beam.copy();
       fromGraveyard = true;
@@ -734,7 +737,8 @@ class Game {
   /// The most distinct colors the sources in a mana plan could have produced (sunburst).
   int sunburstColors(List<ObjectID> plan) {
     final options = <List<ManaColor>>[];
-    for (final id in plan) {
+    // A source that made several mana made them all one color: it counts once.
+    for (final id in plan.toSet()) {
       final o = state.objects[id];
       if (o == null) continue;
       final p = parsedOf(o);
@@ -798,7 +802,7 @@ class Game {
       move(item.id, Zone.battlefield, controller: item.controller);
       if (parsed.isAura) {
         final host = item.context.targets.firstOrNull;
-        if (host == null || state.objects[host]?.zone != Zone.battlefield || !characteristics(host).isCreature) {
+        if (host == null || state.objects[host]?.zone != Zone.battlefield || !auraFits(state.objects[item.id]!, host)) {
           move(item.id, Zone.graveyard);
           log(GameEvent('fizzled', object: item.id));
           return;
@@ -876,8 +880,11 @@ class Game {
       pool[k] = (pool[k] ?? 1) - 1;
       if (pool[k]! <= 0) pool.remove(k);
     }
+    final uses = <ObjectID, int>{};
     for (final id in plan) {
-      if (id <= -1000) continue;
+      if (id > -1000) uses[id] = (uses[id] ?? 0) + 1;
+    }
+    for (final id in uses.keys) {
       final o = state.objects[id];
       if (o == null) continue;
       final parsed = parsedOf(o);
@@ -887,6 +894,14 @@ class Game {
         o.tapped = true;
         log(GameEvent('tapped', object: id));
         fireTriggers(SimpleTrigger.becomesTapped, id);
+        // A source that made more mana than the cost needed leaves the rest in the pool.
+        final best = parsed?.abilities.whereType<ManaAbility>().fold<ManaAbility?>(null, (a, b) => a == null || b.amount > a.amount ? b : a);
+        final extra = (best?.amount ?? 1) - uses[id]!;
+        if (best != null && extra > 0) {
+          final key = best.colors.isEmpty ? 'C' : best.colors.first.symbol;
+          final pool = state.players[o.controller].manaPool;
+          pool[key] = (pool[key] ?? 0) + extra;
+        }
       }
     }
   }
@@ -1290,7 +1305,7 @@ class Game {
         }
         final host = o.attachedTo;
         if (host != null) {
-          if (state.objects[host]?.zone != Zone.battlefield || (parsedOf(o)?.isAura == true && !characteristics(host).isCreature)) {
+          if (state.objects[host]?.zone != Zone.battlefield || (parsedOf(o)?.isAura == true && !auraFits(o, host))) {
             o.attachedTo = null;
             if (parsedOf(o)?.isAura == true) {
               dies(o.id);

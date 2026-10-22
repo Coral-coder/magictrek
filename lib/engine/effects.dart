@@ -317,9 +317,17 @@ extension GameEffects on Game {
         if (ids == null) return false;
         final n = amount(x.amount, controller, source, ctx);
         var given = 0;
-        for (final id in ids) {
-          if (n > 0 && state.objects[id]?.zone == Zone.battlefield) given++;
-          addCounters(x.kind, n, id);
+        final live = ids.where((id) => state.objects[id]?.zone == Zone.battlefield).toList();
+        for (var i = 0; i < ids.length; i++) {
+          final id = ids[i];
+          // Distributed: split as evenly as possible, earlier targets taking the remainder.
+          var each = n;
+          if (x.distribute && live.isNotEmpty) {
+            final at = live.indexOf(id);
+            each = at < 0 ? 0 : n ~/ live.length + (at < n % live.length ? 1 : 0);
+          }
+          if (each > 0 && state.objects[id]?.zone == Zone.battlefield) given++;
+          addCounters(x.kind, each, id);
         }
         ctx.counted = given;
         return ids.isNotEmpty;
