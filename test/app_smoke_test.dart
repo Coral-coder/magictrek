@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart' hide Card;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:magictrek/app/store.dart';
+import 'package:magictrek/engine/game.dart';
+import 'package:magictrek/engine/state.dart';
 import 'package:magictrek/main.dart';
 import 'package:magictrek/ui/decks.dart';
 import 'package:magictrek/ui/gallery.dart';
@@ -118,5 +120,44 @@ void main() {
     expect(find.byType(GameScreen), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('a short, wide screen still shows the opponent\'s cards, with lands as labels or cards', (tester) async {
+    tester.view.physicalSize = const Size(844 * 3, 390 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final store = AppStore.shared;
+    await store.setTourSeen(true);
+    for (final asCards in [false, true]) {
+      await store.setLandsAsCards(asCards);
+      final decks = store.legalDecks;
+      final session = store.startLocalGame(deck: decks[0], opponentDeck: decks[1], hotseat: false);
+      // Put cards in play on both sides: a creature and a land each.
+      final g = session.game;
+      for (final p in [0, 1]) {
+        for (final name in ['Captain Jean-Luc Picard', 'Plains']) {
+          final id = g.newObject(cardID: store.db.byName(name)!.id, owner: p, zone: Zone.hand);
+          g.move(id, Zone.battlefield, controller: p);
+        }
+      }
+      await tester.pumpWidget(app(const GameScreen()));
+      await tester.pump();
+      final theirs = g.state.permanentsOf(1).firstWhere((o) => !g.characteristics(o.id).isLand);
+      final card = find.byKey(ValueKey('perm-${theirs.id}'));
+      expect(card, findsOneWidget, reason: 'opponent creature shown (lands as cards: $asCards)');
+      await tester.ensureVisible(card);
+      await tester.pumpAndSettle();
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('controls this'), findsOneWidget, reason: 'tapping it opens it to read');
+      expect(find.text('CLOSE'), findsOneWidget, reason: 'with its buttons in view');
+      Navigator.of(tester.element(find.byType(GameScreen))).pop();
+      await tester.pumpAndSettle();
+      final theirLand = g.state.permanentsOf(1).firstWhere((o) => g.characteristics(o.id).isLand);
+      expect(find.byKey(ValueKey('perm-${theirLand.id}')), asCards ? findsOneWidget : findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    }
+    await store.setLandsAsCards(false);
   });
 }

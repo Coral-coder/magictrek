@@ -16,7 +16,7 @@ sealed class GameAction with Props {
       case 'respond':
         return RespondAction(DecisionResponse.fromJson(j['r'] as Map<String, dynamic>));
       case 'land':
-        return PlayLandAction(j['id'] as int);
+        return PlayLandAction(j['id'] as int, payLife: j['pay'] as bool?);
       case 'cast':
         return CastAction(
           j['id'] as int,
@@ -71,12 +71,16 @@ class RespondAction extends GameAction {
 }
 
 class PlayLandAction extends GameAction {
-  const PlayLandAction(this.id);
+  const PlayLandAction(this.id, {this.payLife});
+
+  /// For a land that asks "you may pay 2 life; if you don't, it enters tapped": the player's
+  /// answer. Left out, the engine decides (pay while life is above 4).
+  final bool? payLife;
   final ObjectID id;
   @override
-  List<Object?> get props => [id];
+  List<Object?> get props => [id, payLife];
   @override
-  Map<String, dynamic> toJson() => {'t': 'land', 'id': id};
+  Map<String, dynamic> toJson() => {'t': 'land', 'id': id, if (payLife != null) 'pay': payLife};
 }
 
 class CastAction extends GameAction {
