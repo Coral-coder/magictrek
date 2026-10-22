@@ -41,6 +41,28 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      # The NDK (path_provider's jni dependency compiles C with it) is ~700 MB that Gradle
+      # would download on every fresh runner, and that download arrives corrupt now and then.
+      # Keep it in the Actions cache; on a miss install it with retries.
+      - name: Android NDK
+        id: ndk
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/28.2.13676358
+          key: android-ndk-28.2.13676358
+      - name: Install the NDK
+        if: steps.ndk.outputs.cache-hit != 'true'
+        run: |
+          sdk="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$sdk/ndk/28.2.13676358"
+            if yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" > "$RUNNER_TEMP/ndk.log" 2>&1 \
+               && [ -f "$sdk/ndk/28.2.13676358/source.properties" ]; then
+              echo "NDK installed on attempt $attempt"; exit 0
+            fi
+            echo "::warning::NDK install failed on attempt $attempt"; tail -3 "$RUNNER_TEMP/ndk.log"; sleep 10
+          done
+          exit 1
       - name: Build the debug APK
         run: |
           # The NDK the SDK fetches on first use sometimes arrives corrupt ("Error reading Zip

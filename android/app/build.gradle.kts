@@ -8,6 +8,8 @@ android {
     namespace = "com.lightwave.openmtg"
     // permission_handler_android needs API 37; Flutter's default is 36.
     compileSdk = maxOf(flutter.compileSdkVersion, 37)
+    // path_provider's jni dependency compiles C with this NDK; CI caches it (see the
+    // workflows) because the download arrives corrupt now and then.
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
