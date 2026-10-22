@@ -59,7 +59,12 @@ class Updater extends ChangeNotifier {
   bool downloading = false;
   double progress = 0;
   String? error;
-  bool _checkedOnLaunch = false;
+  /// Download a newer build as soon as it is seen, so installing is one tap.
+  bool autoDownload = true;
+  /// Set once the APK of [available] is in the cache and ready to install.
+  File? downloaded;
+  DateTime? _lastCheck;
+  static const _recheckEvery = Duration(hours: 1);
 
   Future<void> _readInstalled() async {
     if (installedCode > 0 || !supported) return;
@@ -74,11 +79,29 @@ class Updater extends ChangeNotifier {
     }
   }
 
-  /// Checks once per launch; the main menu shows the prompt when something newer exists.
-  Future<ReleaseInfo?> checkOnLaunch() async {
-    if (_checkedOnLaunch || !supported) return null;
-    _checkedOnLaunch = true;
-    return check();
+  /// The automatic check: on launch and whenever the app comes back to the foreground, at
+  /// most once an hour. When a newer build exists and [autoDownload] is on, the APK is fetched
+  /// right away so the prompt can offer "Install" instead of a download.
+  Future<ReleaseInfo?> checkAutomatically() async {
+    if (!supported) return null;
+    final now = DateTime.now();
+    if (_lastCheck != null && now.difference(_lastCheck!) < _recheckEvery) return available;
+    _lastCheck = now;
+    await _cleanCache();
+    final release = await check();
+    if (release != null && autoDownload && downloaded == null && !downloading) {
+      await download(release);
+    }
+    return release;
+  }
+
+  /// Throws away cached APKs; a fresh one is fetched when needed.
+  Future<void> _cleanCache() async {
+    try {
+      final dir = Directory('${(await getTemporaryDirectory()).path}/updates');
+      if (await dir.exists()) await dir.delete(recursive: true);
+      downloaded = null;
+    } catch (_) {}
   }
 
   /// Looks up the latest release. Returns the newer build, or null when up to date or offline.
@@ -102,13 +125,9 @@ class Updater extends ChangeNotifier {
     return available;
   }
 
-  /// Downloads [release] (or the known newer build) and opens the installer. Returns false when
-  /// the APK is signed with a different key than the installed app, in which case Android will
-  /// refuse the update and the app has to be uninstalled first; the installer is still opened
-  /// when [force] is set.
-  Future<bool> downloadAndInstall({ReleaseInfo? release, bool force = false}) async {
-    final r = release ?? available;
-    if (r == null || downloading) return false;
+  /// Fetches the APK of [release] into the cache. Returns the file, or null on failure.
+  Future<File?> download(ReleaseInfo release) async {
+    if (downloading) return null;
     downloading = true;
     progress = 0;
     error = null;
@@ -116,8 +135,29 @@ class Updater extends ChangeNotifier {
     try {
       final dir = Directory('${(await getTemporaryDirectory()).path}/updates');
       await dir.create(recursive: true);
-      final file = File('${dir.path}/MagicTrek-${r.versionCode}.apk');
-      await _download(Uri.parse(r.apkUrl), file);
+      final file = File('${dir.path}/MagicTrek-${release.versionCode}.apk');
+      await _download(Uri.parse(release.apkUrl), file);
+      downloaded = file;
+      return file;
+    } catch (e) {
+      error = 'Download failed: $e';
+      return null;
+    } finally {
+      downloading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Hands the downloaded build to Android's package installer. Returns false when the APK is
+  /// signed with a different key than the installed app, in which case Android would refuse
+  /// the update and the app has to be uninstalled first; the installer is still opened when
+  /// [force] is set.
+  Future<bool> install({bool force = false}) async {
+    final file = downloaded;
+    if (file == null || downloading) return false;
+    error = null;
+    notifyListeners();
+    try {
       final same = await _channel.invokeMethod<bool>('sameSigner', {'path': file.path});
       if (same == false && !force) {
         error = 'This build is signed with a different key than the installed app, so Android will not install it over the old one. Uninstall MagicTrek, then install the new build.';
@@ -126,16 +166,23 @@ class Updater extends ChangeNotifier {
       await _channel.invokeMethod('installApk', {'path': file.path});
       return true;
     } catch (e) {
-      error = 'Update failed: $e';
+      error = 'Install failed: $e';
       return false;
     } finally {
-      downloading = false;
       notifyListeners();
     }
   }
 
+  /// Downloads [release] (or the known newer build) if needed, then opens the installer.
+  Future<bool> downloadAndInstall({ReleaseInfo? release, bool force = false}) async {
+    final r = release ?? available;
+    if (r == null) return false;
+    if (downloaded == null && await download(r) == null) return false;
+    return install(force: force);
+  }
+
   /// Opens the installer for an APK that was already downloaded but refused for its signature.
-  Future<bool> installAnyway() => downloadAndInstall(force: true);
+  Future<bool> installAnyway() => install(force: true);
 
   Future<List<int>> _get(Uri uri) async {
     final client = HttpClient()..userAgent = 'MagicTrek';

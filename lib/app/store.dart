@@ -12,6 +12,7 @@ import '../net/relay.dart';
 import 'notifications.dart';
 import 'session.dart';
 import 'sound.dart';
+import 'updater.dart';
 
 /// App-wide state: settings, decks, the saved local game, the current session.
 class AppStore extends ChangeNotifier {
@@ -24,7 +25,7 @@ class AppStore extends ChangeNotifier {
   Map<String, dynamic>? savedGame;
   GameSession? session;
   String playerName = 'Captain';
-  bool soundOn = true, hapticsOn = true;
+  bool soundOn = true, hapticsOn = true, autoUpdate = true;
   String deviceId = '';
   String relayIdentity = '';
   List<String> relays = List.of(defaultRelays);
@@ -38,6 +39,8 @@ class AppStore extends ChangeNotifier {
     playerName = _prefs.getString('playerName') ?? 'Captain';
     soundOn = _prefs.getBool('soundOn') ?? true;
     hapticsOn = _prefs.getBool('hapticsOn') ?? true;
+    autoUpdate = _prefs.getBool('autoUpdate') ?? true;
+    Updater.shared.autoDownload = autoUpdate;
     deviceId = _prefs.getString('deviceId') ?? '';
     if (deviceId.isEmpty) {
       deviceId = newMatchCode(10);
@@ -91,6 +94,13 @@ class AppStore extends ChangeNotifier {
     soundOn = v;
     Console.shared.soundOn = v;
     await _prefs.setBool('soundOn', v);
+    notifyListeners();
+  }
+
+  Future<void> setAutoUpdate(bool v) async {
+    autoUpdate = v;
+    Updater.shared.autoDownload = v;
+    await _prefs.setBool('autoUpdate', v);
     notifyListeners();
   }
 

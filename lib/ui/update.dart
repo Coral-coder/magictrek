@@ -28,7 +28,10 @@ class UpdateDialog extends StatelessWidget {
             const SizedBox(height: 14),
             ClipRRect(borderRadius: BorderRadius.circular(6), child: LinearProgressIndicator(value: u.progress, minHeight: 10, backgroundColor: LCARS.gray.withValues(alpha: 0.3), color: LCARS.gold)),
             const SizedBox(height: 6),
-            Text(u.progress >= 1 ? 'Opening the installer…' : 'Downloading ${(u.progress * 100).round()}%', style: LCARS.label),
+            Text('Downloading ${(u.progress * 100).round()}%', style: LCARS.label),
+          ] else if (u.downloaded != null) ...[
+            const SizedBox(height: 8),
+            Text('Downloaded and ready to install.', style: LCARS.label.copyWith(color: LCARS.green)),
           ],
           if (u.error != null) ...[const SizedBox(height: 10), Text(u.error!, style: LCARS.label.copyWith(color: LCARS.alert))],
         ]),
@@ -37,7 +40,7 @@ class UpdateDialog extends StatelessWidget {
           if (!u.downloading && u.error != null && u.error!.contains('different key'))
             TextButton(onPressed: u.installAnyway, child: Text('OPEN INSTALLER ANYWAY', style: LCARS.font(13, color: LCARS.peach))),
           if (!u.downloading)
-            LcarsButton('Update', icon: Icons.system_update, expand: false, height: 36, onPressed: () async {
+            LcarsButton(u.downloaded != null ? 'Install' : 'Download & install', icon: Icons.system_update, expand: false, height: 36, onPressed: () async {
               final ok = await u.downloadAndInstall(release: release);
               if (ok && context.mounted) Navigator.pop(context);
             }),
@@ -47,8 +50,8 @@ class UpdateDialog extends StatelessWidget {
   }
 }
 
-/// Checks GitHub once per launch and shows [UpdateDialog] when a newer build exists. Wrap the
-/// first screen with it; it draws nothing itself.
+/// Checks GitHub on launch and whenever the app returns to the foreground, and shows
+/// [UpdateDialog] when a newer build exists. Wrap the first screen with it; it draws nothing.
 class UpdateCheck extends StatefulWidget {
   const UpdateCheck({super.key, required this.child});
   final Widget child;
@@ -56,13 +59,36 @@ class UpdateCheck extends StatefulWidget {
   State<UpdateCheck> createState() => _UpdateCheckState();
 }
 
-class _UpdateCheckState extends State<UpdateCheck> {
+class _UpdateCheckState extends State<UpdateCheck> with WidgetsBindingObserver {
+  bool _showing = false;
+
   @override
   void initState() {
     super.initState();
-    Updater.shared.checkOnLaunch().then((release) {
-      if (release != null && mounted) UpdateDialog.show(context, release);
-    });
+    WidgetsBinding.instance.addObserver(this);
+    _check();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _check();
+  }
+
+  Future<void> _check() async {
+    final u = Updater.shared;
+    final already = u.available;
+    final release = await u.checkAutomatically();
+    // Prompt once per build found; a resume that finds the same build stays quiet.
+    if (release == null || !mounted || _showing || (already != null && already.versionCode == release.versionCode)) return;
+    _showing = true;
+    await UpdateDialog.show(context, release);
+    _showing = false;
   }
 
   @override

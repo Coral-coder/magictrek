@@ -136,8 +136,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (Updater.shared.supported) ...[
             const LcarsHeader('Updates', color: LCARS.green),
-            Text('Builds are published on GitHub Releases; the app checks on launch and installs over itself.', style: LCARS.label),
-            const SizedBox(height: 6),
+            Text('Builds are published on GitHub Releases. The app checks on launch and when it returns to the foreground, fetches a newer build in the background and installs it over itself with one tap.', style: LCARS.label),
+            SwitchListTile(title: Text('Download new builds automatically', style: LCARS.body), value: store.autoUpdate, activeThumbColor: LCARS.green, onChanged: store.setAutoUpdate, contentPadding: EdgeInsets.zero),
             ListenableBuilder(
               listenable: Updater.shared,
               builder: (context, _) {
