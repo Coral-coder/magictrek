@@ -27,7 +27,7 @@ targets:
     sources:
       - path: MagicTrek
         excludes: ["Info.plist"]
-      - path: cards
+      - path: ../cards
         type: folder
         buildPhase: resources
     dependencies:

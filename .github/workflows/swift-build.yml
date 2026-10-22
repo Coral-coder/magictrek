@@ -1,16 +1,16 @@
-# Builds the app for the iOS Simulator and runs the rules-engine tests on every pull request and
-# on pushes to feature branches, so compile errors show up before anything reaches TestFlight.
-# No signing is involved.
-name: iOS build
+# Builds the native SwiftUI version in swift/ for the iOS Simulator and runs its rules-engine
+# tests whenever swift/ changes. No signing is involved; the app that ships is the Flutter one.
+name: Swift build
 
 on:
   pull_request:
+    paths: ["swift/**", "cards/**", ".github/workflows/swift-build.yml"]
   push:
-    branches-ignore: [main]
+    paths: ["swift/**", "cards/**", ".github/workflows/swift-build.yml"]
   workflow_dispatch:
 
 concurrency:
-  group: ios-build-${{ github.ref }}
+  group: swift-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,15 +28,17 @@ jobs:
           xcodebuild -version
 
       - name: Rules engine tests
-        working-directory: Packages/MagicTrekCore
+        working-directory: swift/Packages/MagicTrekCore
         run: swift test 2>&1 | tail -40
 
       - name: Generate the Xcode project
+        working-directory: swift
         run: |
           brew install --quiet xcodegen
           xcodegen generate
 
       - name: Build for the simulator
+        working-directory: swift
         run: |
           set -o pipefail
           mkdir -p build
@@ -54,6 +56,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: xcodebuild-log
-          path: build/xcodebuild.log
+          path: swift/build/xcodebuild.log
           if-no-files-found: ignore
           retention-days: 3
