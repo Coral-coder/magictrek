@@ -161,19 +161,28 @@ def main():
     overrides = {k: v for k, v in json.load(open(OVERRIDES)).items() if not k.startswith("_")}
     for stem, o in overrides.items():
         c = dict(fetch_named(o["base"], args.cache)) if "base" in o else {}
-        c.update({k: v for k, v in o.items() if k != "base"})
-        if "set" not in c or not c.get("collector_number"):
+        use_scryfall_image = bool(o.get("useScryfallImage"))
+        c.update({k: v for k, v in o.items() if k not in ("base", "useScryfallImage")})
+        if "set" not in c:
             continue
-        card_id = f"{c['set']}-{re.sub(r'[^A-Za-z0-9]', '', c['collector_number'])}"
-        if any(e["id"] == card_id for e in out):
-            continue  # Scryfall has it now; the override is no longer needed
-        src = os.path.join(CARDS_DIR, stem + ".jpg")
-        if not os.path.exists(src):
-            print(f"WARNING: no scan cards/{stem}.jpg for override {c['name']}", file=sys.stderr)
-            continue
-        dst = f"ms-{stem}.jpg"
-        with open(src, "rb") as f, open(os.path.join(IMAGES, dst), "wb") as g:
-            g.write(f.read())
+        number = re.sub(r"[^A-Za-z0-9]", "", c.get("collector_number") or "")
+        card_id = f"{c['set']}-{number or stem}"
+        if any(e["id"] == card_id or (e["set"] == c["set"] and norm(e["name"]) == norm(c["name"])) for e in out):
+            continue  # Scryfall lists it in this set now; the override is no longer needed
+        uris = image_uris(c) if use_scryfall_image else {}
+        url = uris.get(args.size) or uris.get("large") or uris.get("normal")
+        if url:
+            dst = f"{card_id}.jpg"
+            if download(url, os.path.join(IMAGES, dst)):
+                downloaded += 1
+        else:
+            src = os.path.join(CARDS_DIR, stem + ".jpg")
+            if not os.path.exists(src):
+                print(f"WARNING: no scan cards/{stem}.jpg for override {c['name']}", file=sys.stderr)
+                continue
+            dst = f"ms-{stem}.jpg"
+            with open(src, "rb") as f, open(os.path.join(IMAGES, dst), "wb") as g:
+                g.write(f.read())
         c.pop("image_uris", None)
         key = (False, norm(c["name"]))
         variant = key in seen_names

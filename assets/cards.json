@@ -14147,6 +14147,82 @@
    ]
   },
   {
+   "id": "trc-burstlightning",
+   "name": "Burst Lightning",
+   "file": "images/trc-burstlightning.jpg",
+   "set": "trc",
+   "collectorNumber": "",
+   "rarity": "uncommon",
+   "manaCost": "{R}",
+   "manaValue": 1,
+   "colors": [
+    "R"
+   ],
+   "colorIdentity": [
+    "R"
+   ],
+   "typeLine": "Instant",
+   "supertypes": [],
+   "types": [
+    "Instant"
+   ],
+   "subtypes": [],
+   "oracleText": "Kicker {4} (You may pay an additional {4} as you cast this spell.)\nBurst Lightning deals 2 damage to any target. If this spell was kicked, it deals 4 damage instead.",
+   "flavorText": "",
+   "keywords": [
+    "Kicker"
+   ],
+   "power": null,
+   "toughness": null,
+   "producedMana": [],
+   "layout": "normal",
+   "artist": "Vance Kovacs",
+   "variant": false,
+   "token": false,
+   "scryfallId": "aec5d380-d354-4750-931a-6c91853e2edc",
+   "imageLarge": "",
+   "frame": [
+    "startercollection"
+   ]
+  },
+  {
+   "id": "trc-solemnsimulacrum",
+   "name": "Solemn Simulacrum",
+   "file": "images/trc-solemnsimulacrum.jpg",
+   "set": "trc",
+   "collectorNumber": "",
+   "rarity": "rare",
+   "manaCost": "{4}",
+   "manaValue": 4,
+   "colors": [],
+   "colorIdentity": [],
+   "typeLine": "Artifact Creature — Golem",
+   "supertypes": [],
+   "types": [
+    "Artifact",
+    "Creature"
+   ],
+   "subtypes": [
+    "Golem"
+   ],
+   "oracleText": "When this creature enters, you may search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.\nWhen this creature dies, you may draw a card.",
+   "flavorText": "",
+   "keywords": [],
+   "power": "2",
+   "toughness": "2",
+   "producedMana": [],
+   "layout": "normal",
+   "artist": "Flavio Greco Paglia",
+   "variant": false,
+   "token": false,
+   "scryfallId": "daafd816-f7c1-4630-9e5c-a1e5db570a35",
+   "imageLarge": "",
+   "frame": [
+    "surgefoil",
+    "universesbeyond"
+   ]
+  },
+  {
    "id": "trc-1",
    "name": "The Borg Queen",
    "file": "images/trc-1.jpg",
