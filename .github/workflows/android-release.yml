@@ -13,7 +13,7 @@
 # always point at the newest release; the app reads update.json on launch.
 #
 # Signing: with the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
-# ANDROID_KEY_PASSWORD secrets the APK is signed with that key, and in-app updates install over
+# ANDROID_KEY_PASSWORD secrets (or the same without the ANDROID_ prefix) the APK is signed with that key, and in-app updates install over
 # the previous build. With none of those but a SECRETS_TOKEN secret (a GitHub token that may
 # write this repository's Actions secrets) the workflow creates the key itself, stores it as
 # those four secrets, signs this build with it and attaches an encrypted backup to the run.
@@ -111,10 +111,10 @@ jobs:
       # Secrets: read and write on this repository); else the runner's throwaway debug key.
       - name: Release keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}
           TOKEN_1: ${{ secrets.SECRETS_TOKEN }}
           TOKEN_2: ${{ secrets.GH_PAT }}
           TOKEN_3: ${{ secrets.REPO_TOKEN }}
