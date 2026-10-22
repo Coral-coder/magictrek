@@ -17,11 +17,11 @@ class _CardGalleryScreenState extends State<CardGalleryScreen> {
   ManaColor? color;
   String? type;
   Rarity? rarity;
-  bool onlySupported = false, showVariants = false;
+  bool onlySupported = false, showVariants = false, showTokens = false;
 
   List<Card> get cards {
     final db = AppStore.shared.db;
-    final base = showVariants ? (List.of(db.cards)..sort((a, b) => a.compareTo(b))) : db.distinctCards;
+    final base = showTokens ? db.tokens : (showVariants ? (db.cards.where((c) => !c.token).toList()..sort((a, b) => a.compareTo(b))) : db.distinctCards);
     final q = search.toLowerCase();
     return base.where((c) {
       if (color != null && !c.colors.contains(color)) return false;
@@ -69,7 +69,8 @@ class _CardGalleryScreenState extends State<CardGalleryScreen> {
             for (final t in const ['Creature', 'Artifact', 'Instant', 'Sorcery', 'Enchantment', 'Land']) chip(t, type == t, LCARS.lavender, () => setState(() => type = type == t ? null : t)),
             for (final r in Rarity.values) chip(r.name, rarity == r, LCARS.gold, () => setState(() => rarity = rarity == r ? null : r)),
             chip('Fully playable', onlySupported, LCARS.green, () => setState(() => onlySupported = !onlySupported)),
-            chip('Alt art', showVariants, LCARS.peach, () => setState(() => showVariants = !showVariants)),
+            chip('All printings', showVariants, LCARS.peach, () => setState(() => showVariants = !showVariants)),
+            chip('Tokens', showTokens, LCARS.ice, () => setState(() => showTokens = !showTokens)),
           ]),
         ),
         Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${list.length} cards', style: LCARS.small.copyWith(color: LCARS.gray))),

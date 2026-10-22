@@ -31,4 +31,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/cards.json
-    - cards/
+    - assets/images/

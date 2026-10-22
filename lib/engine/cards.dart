@@ -55,6 +55,9 @@ class Card with Props {
     this.artist = '',
     this.variant = false,
     this.imageLarge = '',
+    this.token = false,
+    this.scryfallId = '',
+    this.frame = const [],
   }) : colorIdentity = colorIdentity ?? colors;
 
   /// The image file's stem, e.g. "captainjeanlucpicard".
@@ -83,6 +86,14 @@ class Card with Props {
   final String artist;
   final bool variant;
   final String imageLarge;
+  /// A token card from the set's token sheet (not for decks; used as the face of created tokens).
+  final bool token;
+  final String scryfallId;
+  /// Frame effects and promo types ("showcase", "extendedart", "surgefoil"...).
+  final List<String> frame;
+
+  /// Asset path of the bundled scan (Scryfall's large image, or the mythicspoiler scan).
+  String get imagePath => 'assets/$file';
 
   factory Card.fromJson(Map<String, dynamic> j) {
     List<String> strings(String k) => (j[k] as List?)?.map((e) => e.toString()).toList() ?? const [];
@@ -114,6 +125,9 @@ class Card with Props {
       artist: (j['artist'] as String?) ?? '',
       variant: (j['variant'] as bool?) ?? false,
       imageLarge: (j['imageLarge'] as String?) ?? '',
+      token: (j['token'] as bool?) ?? false,
+      scryfallId: (j['scryfallId'] as String?) ?? '',
+      frame: strings('frame'),
     );
   }
 
@@ -274,7 +288,11 @@ class CardDatabase {
     }
     final sorted = List.of(cards)..sort((a, b) => (a.variant ? 1 : 0) - (b.variant ? 1 : 0));
     for (final c in sorted) {
-      _byName.putIfAbsent(c.name, () => c);
+      if (c.token) {
+        _tokensByName.putIfAbsent(c.name, () => c);
+      } else {
+        _byName.putIfAbsent(c.name, () => c);
+      }
     }
   }
 
@@ -287,13 +305,26 @@ class CardDatabase {
   final String generated;
   final Map<String, Card> _byId = {};
   final Map<String, Card> _byName = {};
+  final Map<String, Card> _tokensByName = {};
   final Map<String, ParsedCard> _parsed = {};
 
   Card? operator [](String id) => _byId[id];
   Card? byName(String name) => _byName[name];
 
-  /// One card per name: the main printing of each.
+  /// One card per name: the main printing of each (tokens excluded).
   List<Card> get distinctCards => _byName.values.toList()..sort((a, b) => a.compareTo(b));
+
+  /// The printed token cards, one per name.
+  List<Card> get tokens => _tokensByName.values.toList()..sort((a, b) => a.compareTo(b));
+
+  /// The printed token card for a created token, if the set has one ("Human", "Treasure"...).
+  Card? tokenCard(String name, {int? power, int? toughness}) {
+    final t = _tokensByName[name];
+    if (t == null) return null;
+    if (power != null && t.power != null && int.tryParse(t.power!) != power) return null;
+    if (toughness != null && t.toughness != null && int.tryParse(t.toughness!) != toughness) return null;
+    return t;
+  }
 
   /// The abilities parsed from a card's rules text, cached.
   ParsedCard parsed(Card card) => _parsed.putIfAbsent(card.id, () => AbilityParser.parse(card));

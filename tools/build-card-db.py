@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""Builds assets/cards.json: one entry per card image in cards/, with the card's
-rules data from Scryfall (sets trk = Star Trek, trc = Star Trek Commander) joined to it by name.
-Cards Scryfall has no record for are filled in from tools/card-overrides.json.
+"""Builds the card database the app ships: assets/cards.json plus one high-resolution image per
+printing in assets/images/.
 
-    tools/build-card-db.py [--cache DIR]
+The source of truth is Scryfall: every printing of every set in SETS (the Star Trek set, its
+Commander decks and its tokens), with Scryfall's "large" scan (672x936) downloaded for each.
+Cards Scryfall doesn't list yet come from tools/card-overrides.json with the mythicspoiler.com
+scan in cards/ as their image.
 
-Scryfall responses are cached in DIR (default .scryfall-cache, git-ignored) so re-runs are
-offline. Prints what matched how and fails if any image is left without data.
+    tools/build-card-db.py [--sets trk,trc,ttrk] [--size large|normal] [--cache DIR]
+
+To add a set later, add its code to --sets (or SETS below) and re-run; everything is cached in
+DIR (default .scryfall-cache, git-ignored) so re-runs are quick and offline-friendly.
 """
-import argparse, difflib, json, os, re, sys, time, urllib.parse, urllib.request
+import argparse, json, os, re, sys, time, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CARDS_DIR = os.path.join(ROOT, "cards")
 OUT = os.path.join(ROOT, "assets", "cards.json")
+IMAGES = os.path.join(ROOT, "assets", "images")
 OVERRIDES = os.path.join(ROOT, "tools", "card-overrides.json")
-SETS = ["trk", "trc"]
-UA = "magictrek-card-db/1.0 (https://github.com/coral-coder/magictrek)"
-SKIP_FILES = {"mythicspoiler"}  # the site's logo, not a card
+SETS = ["trk", "trc", "ttrk"]
+UA = "magictrek-card-db/2.0 (https://github.com/coral-coder/magictrek)"
 
 
-def get(url, cache_dir, key):
+def get_json(url, cache_dir, key):
     path = os.path.join(cache_dir, key + ".json")
     if os.path.exists(path):
         return json.load(open(path))
@@ -37,7 +41,13 @@ def fetch_set(code, cache_dir):
     url = ("https://api.scryfall.com/cards/search?order=set&unique=prints&include_extras=true"
            "&include_variations=true&q=" + urllib.parse.quote(f"set:{code}"))
     while url:
-        data = get(url, cache_dir, f"{code}-page{page}")
+        try:
+            data = get_json(url, cache_dir, f"{code}-page{page}")
+        except urllib.error.HTTPError as e:
+            if e.code == 404 and page == 1:
+                print(f"WARNING: set {code} has no cards on Scryfall yet", file=sys.stderr)
+                return []
+            raise
         cards += data["data"]
         url = data.get("next_page")
         page += 1
@@ -45,8 +55,18 @@ def fetch_set(code, cache_dir):
 
 
 def fetch_named(name, cache_dir):
-    url = "https://api.scryfall.com/cards/named?exact=" + urllib.parse.quote(name)
-    return get(url, cache_dir, "named-" + norm(name))
+    return get_json("https://api.scryfall.com/cards/named?exact=" + urllib.parse.quote(name), cache_dir, "named-" + norm(name))
+
+
+def download(url, path):
+    if os.path.exists(path) and os.path.getsize(path) > 1000:
+        return False
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=60) as r, open(path + ".part", "wb") as f:
+        f.write(r.read())
+    os.replace(path + ".part", path)
+    time.sleep(0.1)
+    return True
 
 
 def norm(name):
@@ -57,28 +77,26 @@ def split_type_line(type_line):
     front = type_line.split(" // ")[0]
     left, _, right = front.partition(" — ")
     words = left.split()
-    supertypes = [w for w in words if w in ("Legendary", "Basic", "Snow", "World")]
+    supertypes = [w for w in words if w in ("Legendary", "Basic", "Snow", "World", "Token")]
     types = [w for w in words if w not in supertypes]
     subtypes = right.split() if right else []
     return supertypes, types, subtypes
 
 
-def station(oracle_text):
-    """Spacecraft: the 'N+ | Flying, lifelink' line gives the Station threshold and what it has then."""
-    m = re.search(r"^(\d+)\+\s*\|\s*(.*)$", oracle_text, re.M)
-    if not m:
-        return None, []
-    return int(m.group(1)), [k.strip().lower() for k in m.group(2).split(",") if k.strip()]
+def image_uris(c):
+    if "image_uris" in c:
+        return c["image_uris"]
+    faces = c.get("card_faces") or []
+    return faces[0].get("image_uris", {}) if faces else {}
 
 
-def entry(file, c, variant):
+def entry(card_id, c, image_file, variant, is_token):
     supertypes, types, subtypes = split_type_line(c["type_line"])
-    threshold, station_keywords = station(c.get("oracle_text", ""))
-    images = c.get("image_uris") or {}
+    uris = image_uris(c)
     return {
-        "id": file,
+        "id": card_id,
         "name": c["name"],
-        "file": file + ".jpg",
+        "file": image_file,
         "set": c.get("set", ""),
         "collectorNumber": c.get("collector_number", ""),
         "rarity": c.get("rarity", "common"),
@@ -99,62 +117,85 @@ def entry(file, c, variant):
         "layout": c.get("layout", "normal"),
         "artist": c.get("artist", ""),
         "variant": variant,
-        "imageLarge": images.get("large") or images.get("normal") or "",
+        "token": is_token,
+        "scryfallId": c.get("id", ""),
+        "imageLarge": uris.get("large") or uris.get("normal") or "",
+        "frame": c.get("frame_effects", []) + c.get("promo_types", []),
     }
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--sets", default=",".join(SETS), help="comma-separated Scryfall set codes")
+    ap.add_argument("--size", default="large", choices=["large", "normal", "png"])
     ap.add_argument("--cache", default=os.path.join(ROOT, ".scryfall-cache"))
     args = ap.parse_args()
+    sets = [s.strip().lower() for s in args.sets.split(",") if s.strip()]
+    os.makedirs(IMAGES, exist_ok=True)
 
-    scry = []
-    for code in SETS:
-        scry += fetch_set(code, args.cache)
-    by_name = {}
-    for c in scry:
-        by_name.setdefault(norm(c["name"]), []).append(c)
-    keys = list(by_name)
+    out, downloaded = [], 0
+    # The first (lowest collector number, non-promo) printing of each name is the main one.
+    seen_names = {}
+    for code in sets:
+        cards = fetch_set(code, args.cache)
+        cards.sort(key=lambda c: (bool(c.get("promo")), int(re.sub(r"\D", "", c.get("collector_number", "0")) or 0), c.get("collector_number", "")))
+        for c in cards:
+            num = re.sub(r"[^A-Za-z0-9]", "", c.get("collector_number", ""))
+            card_id = f"{code}-{num}"
+            is_token = c.get("layout") == "token" or c.get("set_type") == "token" or "Token" in c["type_line"]
+            uris = image_uris(c)
+            url = uris.get(args.size) or uris.get("large") or uris.get("normal")
+            image_file = f"images/{card_id}.jpg"
+            if url:
+                if download(url, os.path.join(IMAGES, f"{card_id}.jpg")):
+                    downloaded += 1
+            else:
+                print(f"WARNING: no image for {card_id} {c['name']}", file=sys.stderr)
+                image_file = ""
+            key = (is_token, norm(c["name"]))
+            variant = key in seen_names
+            seen_names.setdefault(key, card_id)
+            out.append(entry(card_id, c, image_file, variant, is_token))
+
+    # Cards Scryfall doesn't have: rules from an override, image from the mythicspoiler scan.
     overrides = {k: v for k, v in json.load(open(OVERRIDES)).items() if not k.startswith("_")}
-
-    files = sorted(f[:-4] for f in os.listdir(CARDS_DIR) if f.endswith(".jpg") and f[:-4] not in SKIP_FILES)
-    out, fuzzy, used = [], [], {}
-    for f in files:
-        if f in overrides:
-            o = overrides[f]
-            c = dict(fetch_named(o["base"], args.cache)) if "base" in o else {}
-            c.update({k: v for k, v in o.items() if k != "base"})
-            out.append(entry(f, c, variant=False))
+    for stem, o in overrides.items():
+        c = dict(fetch_named(o["base"], args.cache)) if "base" in o else {}
+        c.update({k: v for k, v in o.items() if k != "base"})
+        if "set" not in c or not c.get("collector_number"):
             continue
-        # The file name is the card name squashed, sometimes with a suffix: p (promo/alt art),
-        # p2/p3 (further alternates), 1..4 (basic lands).
-        candidates = [f, re.sub(r"\d+$", "", f), re.sub(r"p$", "", f), re.sub(r"p\d+$", "", f), re.sub(r"\d+p$", "", f)]
-        key = next((k for k in candidates if k in by_name), None)
-        if key is None:  # the site's own typos ("surveryors", "secruity")
-            m = difflib.get_close_matches(f, keys, n=1, cutoff=0.8) or difflib.get_close_matches(candidates[2], keys, n=1, cutoff=0.8)
-            if m:
-                key = m[0]
-                fuzzy.append((f, key))
-        if key is None:
-            print(f"ERROR: no data for cards/{f}.jpg; add it to tools/card-overrides.json", file=sys.stderr)
-            sys.exit(1)
-        # Several printings share a name; the first one taken is the main-set printing and
-        # every image after it for the same name is a variant (alt art, promo, showcase).
-        printings = by_name[key]
-        n = used.get(key, 0)
-        used[key] = n + 1
-        c = printings[min(n, len(printings) - 1)]
-        out.append(entry(f, c, variant=n > 0 or f != key and bool(re.search(r"p\d*$", f))))
+        card_id = f"{c['set']}-{re.sub(r'[^A-Za-z0-9]', '', c['collector_number'])}"
+        if any(e["id"] == card_id for e in out):
+            continue  # Scryfall has it now; the override is no longer needed
+        src = os.path.join(CARDS_DIR, stem + ".jpg")
+        if not os.path.exists(src):
+            print(f"WARNING: no scan cards/{stem}.jpg for override {c['name']}", file=sys.stderr)
+            continue
+        dst = f"ms-{stem}.jpg"
+        with open(src, "rb") as f, open(os.path.join(IMAGES, dst), "wb") as g:
+            g.write(f.read())
+        c.pop("image_uris", None)
+        key = (False, norm(c["name"]))
+        variant = key in seen_names
+        seen_names.setdefault(key, card_id)
+        out.append(entry(card_id, c, f"images/{dst}", variant, False))
 
-    out.sort(key=lambda e: (e["set"] != "trk", e["set"], int(re.sub(r"\D", "", e["collectorNumber"]) or 0), e["id"]))
+    # Drop images that no longer belong to any card.
+    wanted = {e["file"].split("/")[-1] for e in out if e["file"]}
+    removed = 0
+    for f in os.listdir(IMAGES):
+        if f.endswith(".jpg") and f not in wanted:
+            os.remove(os.path.join(IMAGES, f))
+            removed += 1
+
+    out.sort(key=lambda e: (sets.index(e["set"]) if e["set"] in sets else len(sets), int(re.sub(r"\D", "", e["collectorNumber"]) or 0), e["id"]))
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as fh:
-        json.dump({"generated": time.strftime("%Y-%m-%d"), "cards": out}, fh, indent=1, ensure_ascii=False)
+        json.dump({"generated": time.strftime("%Y-%m-%d"), "sets": sets, "cards": out}, fh, indent=1, ensure_ascii=False)
         fh.write("\n")
-    distinct = len({e["name"] for e in out})
-    print(f"{len(out)} images, {distinct} distinct cards, {len(fuzzy)} matched by fuzzy name:")
-    for f, k in fuzzy:
-        print(f"  {f} -> {k}")
+    distinct = len({(e["token"], e["name"]) for e in out})
+    size = sum(os.path.getsize(os.path.join(IMAGES, f)) for f in os.listdir(IMAGES)) / 1e6
+    print(f"{len(out)} printings, {distinct} distinct cards ({sum(1 for e in out if e['token'])} tokens), {downloaded} images downloaded, {removed} stale removed, {size:.0f} MB of images")
     print(f"wrote {os.path.relpath(OUT, ROOT)}")
 
 

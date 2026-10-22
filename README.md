@@ -7,8 +7,10 @@ friend nearby over Wi‑Fi or Bluetooth, or play anyone anywhere through public 
 
 | Path | What |
 | --- | --- |
-| `cards/` | The 351 card scans (JPG) pulled from mythicspoiler.com by the Card images workflow. |
-| `tools/build-card-db.py` | Joins those images with Scryfall's rules data into `assets/cards.json`. Run it after new cards arrive. |
+| `assets/images/` | One high-resolution scan per printing (Scryfall's 672×936 "large" image), ~52 MB. |
+| `assets/cards.json` | Every printing of every set in the database with its rules data. |
+| `tools/build-card-db.py` | Builds both from Scryfall: `--sets trk,trc,ttrk` (the Star Trek set, its Commander decks, its tokens). Add a set code to expand. |
+| `cards/` | The mythicspoiler.com scans pulled by the Card images workflow; used only for cards Scryfall doesn't list yet (`tools/card-overrides.json`). |
 | `lib/engine/` | The rules: card database, rules-text parser, deterministic game, combat, triggers, computer player, starter decks. Pure Dart. |
 | `lib/net/` | Lockstep protocol and transports: LAN (UDP discovery + TCP), Bluetooth LE, Nostr relays. |
 | `lib/app/` | App state, sessions, saved games, sounds, notifications. |
@@ -71,15 +73,23 @@ running (foreground or background) to notice a remote move.
 - **Every pull request**: `.github/workflows/flutter-ci.yml` runs the analyzer and tests, builds a
   debug APK (artifact) and an unsigned iOS build.
 
-## Card images
+## Cards and images
 
-`.github/workflows/card-images.yml` pulls every JPG from MythicSpoiler's Star Trek set listing
-(https://mythicspoiler.com/trk/cards/) into `cards/` and commits whatever is new or changed. It
-runs daily and from Actions → Card images → Run workflow. The same script works locally:
+The database is built from Scryfall, which has every printing of the set (showcase, extended-art
+and promo versions included) with a high-resolution scan of each:
 
-    .github/scripts/fetch-card-images.sh cards
+    tools/build-card-db.py                 # the sets in SETS: trk, trc, ttrk
+    tools/build-card-db.py --sets trk,trc,ttrk,xyz   # add a set
 
-After new images land, run `tools/build-card-db.py` and commit the updated `assets/cards.json`.
+It writes `assets/cards.json` and downloads one 672×936 JPG per printing into `assets/images/`
+(cached in `.scryfall-cache/`, so re-runs only fetch what's new). Commit both. The app shows the
+main printing of each card in the database and lets you browse all printings and the token sheet.
+
+Cards that aren't on Scryfall yet (spoiled but not released) are listed in
+`tools/card-overrides.json` with their rules text and use the mythicspoiler.com scan from `cards/`.
+`.github/workflows/card-images.yml` keeps `cards/` current from https://mythicspoiler.com/trk/cards/
+(daily, or Actions → Card images → Run workflow); once Scryfall lists a card, the override is
+ignored automatically.
 
 ## Credits
 

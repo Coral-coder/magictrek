@@ -24,7 +24,7 @@ class CardFace extends StatelessWidget {
     final radius = BorderRadius.circular(width * 0.045);
     final c = card;
     Widget face = c != null
-        ? Image.asset('cards/${c.file}', width: width, height: h, fit: BoxFit.cover, filterQuality: FilterQuality.medium, errorBuilder: (_, _, _) => TokenFace(card: c, token: token, width: width))
+        ? Image.asset(c.imagePath, width: width, height: h, fit: BoxFit.cover, filterQuality: FilterQuality.medium, errorBuilder: (_, _, _) => TokenFace(card: c, token: token, width: width))
         : TokenFace(card: null, token: token, width: width);
     face = ClipRRect(borderRadius: radius, child: face);
     return Container(
@@ -79,7 +79,8 @@ class PermanentView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final obj = session.state.objects[objectID];
-    final card = obj == null || obj.cardID.isEmpty ? null : session.db[obj.cardID];
+    final t = obj?.token;
+    final card = obj == null ? null : (obj.cardID.isEmpty ? (t == null ? null : session.db.tokenCard(t.name, power: t.power, toughness: t.toughness)) : session.db[obj.cardID]);
     final c = session.game.characteristics(objectID);
     final h = width * cardAspect;
     final tapped = obj?.tapped ?? false;
@@ -212,8 +213,7 @@ class CardDetailBody extends StatelessWidget {
                   width: 300,
                   height: 300 * cardAspect,
                   child: Stack(fit: StackFit.expand, children: [
-                    Image.asset('cards/${card.file}', fit: BoxFit.cover),
-                    if (card.imageLarge.isNotEmpty) Image.network(card.imageLarge, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox.shrink(), loadingBuilder: (_, child, progress) => progress == null ? child : const SizedBox.shrink()),
+                    Image.asset(card.imagePath, fit: BoxFit.cover, filterQuality: FilterQuality.high),
                   ]),
                 ),
               ),
