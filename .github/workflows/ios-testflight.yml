@@ -422,12 +422,23 @@ jobs:
             <key>uploadSymbols</key><true/>
           </dict></plist>
           PLIST
-          xcodebuild -exportArchive -archivePath "build/$SCHEME.xcarchive" \
-            -exportOptionsPlist build/ExportOptions.plist -exportPath build/upload \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          # App Store Connect's side of the export fails now and then before anything is sent
+          # ("Error Downloading App Information", "Communication with Apple failed"); that is
+          # worth a couple more tries, anything else is not.
+          set -o pipefail
+          ok=false
+          for attempt in 1 2 3; do
+            if xcodebuild -exportArchive -archivePath "build/$SCHEME.xcarchive" \
+                -exportOptionsPlist build/ExportOptions.plist -exportPath build/upload \
+                -allowProvisioningUpdates \
+                -authenticationKeyPath "$ASC_KEY_PATH" \
+                -authenticationKeyID "$ASC_KEY_ID" \
+                -authenticationKeyIssuerID "$ASC_ISSUER_ID" 2>&1 | tee build/export.log; then ok=true; break; fi
+            grep -qiE "Error Downloading App Information|Communication with Apple failed|timed out|network connection" build/export.log || break
+            echo "::warning::App Store Connect did not answer (attempt $attempt); trying again in 30 s"
+            sleep 30
+          done
+          [ "$ok" = true ]
           echo "Uploaded $VERSION ($BUILD_NUMBER). It appears in TestFlight after Apple finishes processing (usually 5 to 20 minutes)."
           echo "### TestFlight: uploaded $APP_NAME $VERSION ($BUILD_NUMBER)" >> "$GITHUB_STEP_SUMMARY"
 
