@@ -296,10 +296,16 @@ class Bot {
       int? mode;
       final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
       if (modal != null) mode = chooseMode(game, modal.modes, p, id);
+      var kicked = false;
+      final k = parsed.kicker;
+      if (k != null) {
+        final cost = card.cost..add(k);
+        kicked = game.canPay(cost, p) && game.targetRequirementsForCard(card, mode, kicked: true).every((r) => r.optional || game.legalTargets(r.filter, p, id).isNotEmpty);
+      }
       final targets = <ObjectID>[];
       var ok = true;
       var targetValue = 0;
-      for (final r in game.targetRequirementsForCard(card, mode)) {
+      for (final r in game.targetRequirementsForCard(card, mode, kicked: kicked)) {
         final legal = game.legalTargets(r.filter, p, id);
         final effect = parsed.spellEffects.where((e) {
           final t = targetOf(e);
@@ -318,12 +324,6 @@ class Bot {
         targets.addAll(chosen);
       }
       if (!ok) continue;
-      var kicked = false;
-      final k = parsed.kicker;
-      if (k != null) {
-        final cost = card.cost..add(k);
-        kicked = game.canPay(cost, p);
-      }
       var score = card.manaValue * 3 + (card.isCreature ? card.basePower + card.baseToughness : 0) + targetValue;
       if ((card.isInstant || card.isSorcery) && targetValue == 0 && parsed.spellEffects.any((e) => e is Damage)) score -= 5;
       if (card.isLegendary && game.state.permanentsOf(p).any((o) => game.cardOf(o)?.name == card.name)) continue;
@@ -357,10 +357,14 @@ class Bot {
         int? mode;
         final modal = fx.whereType<Modal>().firstOrNull;
         if (modal != null) mode = modal.modes.indexWhere((m) => m.any((x) => x is CounterSpell));
-        final reqs = game.targetRequirementsForCard(card, mode);
-        if (reqs.isEmpty || reqs.first.filter.kind != FilterKind.spell) continue;
-        if (!game.legalTargets(reqs.first.filter, p, id).contains(top.id)) continue;
-        return CastAction(id, targets: [top.id], mode: mode);
+        for (final kicked in [false, if (game.db.parsed(card).kicker != null) true]) {
+          if (kicked && !game.canPay(card.cost..add(game.db.parsed(card).kicker!), p)) continue;
+          final reqs = game.targetRequirementsForCard(card, mode, kicked: kicked);
+          if (reqs.isEmpty || reqs.first.filter.kind != FilterKind.spell) continue;
+          if (!game.legalTargets(reqs.first.filter, p, id).contains(top.id)) continue;
+          return CastAction(id, targets: [top.id], mode: mode, kicked: kicked);
+        }
+        continue;
       }
       // Protect a creature of ours that the spell targets.
       final threatened = top.context.targets.where((t) => s.objects[t]?.controller == p && s.objects[t]?.zone == Zone.battlefield).toList();

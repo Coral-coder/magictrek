@@ -451,11 +451,15 @@ class Game {
   }
 
   void _endStep() {
+    _emptyManaPools();
     state.phase = Phase.end;
     log(GameEvent('phase', phase: Phase.end));
     final p = state.activePlayer;
     for (final o in state.permanentsOf(p)) {
       fireTriggers(SimpleTrigger.endStep, o.id);
+    }
+    for (final o in state.allPermanents) {
+      fireTriggers(SimpleTrigger.eachEndStep, o.id, touched: EffectContext.playerObject(p));
     }
     for (final o in state.allPermanents) {
       if (o.sacrificeAtEnd) dies(o.id);
@@ -465,6 +469,7 @@ class Game {
   }
 
   void _cleanup() {
+    _emptyManaPools();
     state.phase = Phase.cleanup;
     final p = state.activePlayer;
     final ps = state.players[p];
@@ -513,7 +518,15 @@ class Game {
 
   /// "At the beginning of combat": the active player's triggers, each player's-turn triggers,
   /// and delayed "next combat" triggers.
+  /// Unspent mana goes away as each step ends.
+  void _emptyManaPools() {
+    for (final p in state.players) {
+      p.manaPool.clear();
+    }
+  }
+
   void _beginCombatTriggers() {
+    _emptyManaPools();
     for (final o in state.permanentsOf(state.activePlayer)) {
       fireTriggers(SimpleTrigger.beginCombat, o.id);
     }
@@ -634,7 +647,7 @@ class Game {
         throw GameError('No kicker');
       }
     }
-    final reqs = targetRequirementsForCard(card, mode);
+    final reqs = targetRequirementsForCard(card, mode, kicked: kicked);
     _validateTargets(targets, reqs, p, id);
     for (final t in targets) {
       if (EffectContext.playerFromObject(t) == null) {
@@ -803,6 +816,11 @@ class Game {
   bool counterSpell(ObjectID id) {
     final i = state.stack.indexWhere((s) => s.id == id);
     if (i < 0) return false;
+    final spell = card(id);
+    if (spell != null && db.parsed(spell).statics.contains(SimpleStatic.cantBeCountered)) {
+      log(GameEvent('note', text: "${name(id)} can't be countered"));
+      return false;
+    }
     final item = state.stack.removeAt(i);
     move(id, item.fromGraveyard ? Zone.exile : Zone.graveyard);
     log(GameEvent('countered', object: id, player: item.controller));
@@ -1149,7 +1167,7 @@ class Game {
   bool dies(ObjectID id, {String event = 'died'}) {
     final o = state.objects[id];
     if (o == null || o.zone != Zone.battlefield) return false;
-    if (o.exileIfDiesThisTurn) {
+    if (o.exileIfDiesThisTurn || (o.counters[CounterKind.finality] ?? 0) > 0) {
       move(id, Zone.exile);
       log(GameEvent('exiled', object: id));
       return false;
@@ -1493,6 +1511,7 @@ class Game {
           state.pending = pending;
           throw GameError('Choose one of the candidates');
         }
+        resume.context.sacrificedSubtypes.addAll(characteristics(r.id).subtypes);
         dies(r.id);
         resolve(resume.effects, source: resume.source, controller: resume.controller, context: resume.context);
       case SurveilDecision d:

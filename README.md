@@ -33,9 +33,10 @@ Bundle / application id: `com.lightwave.openmtg`.
   state; a digest of the state after every action is exchanged, so two phones can never drift
   apart without noticing (lockstep).
 - Rules text is parsed into a fixed vocabulary of keywords, triggers, static abilities and effects.
-  Cards whose text isn't fully covered still play with their printed stats and whatever did parse;
-  the card database screen says what's missing for each card. Starter decks use only fully
-  implemented cards.
+  All 236 cards in the set are fully covered; `dart run tool/cardtool.dart` checks this, and the
+  card database screen would say what's missing for a card that isn't.
+- Spells go on a stack. The other player gets a window to respond (counterspells, flash, combat
+  tricks) whenever they hold something they could cast.
 - Set mechanics: Station (Spacecraft become creatures with enough charge counters), Sagas,
   Landfall, Explore, Surveil, Ward, Kicker, Cycling, Beam me up, Assimilate and Discover.
 - The computer player is heuristic: lands by color need, best castable spell, safe attacks, blocks

@@ -911,6 +911,10 @@ class _Parser {
         cost.sacrifice = Filter(FilterKind.artifact, controller: Controller.you)..subtype = m[1][0].toUpperCase() + m[1].substring(1);
         continue;
       }
+      if (p == 'sacrifice a creature') {
+        cost.sacrifice = Filter(FilterKind.creature, controller: Controller.you);
+        continue;
+      }
       m = rx(p, r'sacrifice (another|a|an) (creature or artifact|artifact or creature)');
       if (m != null) {
         cost.sacrifice = Filter(FilterKind.artifactOrCreature, controller: Controller.you)..other = m[1] == 'another';
@@ -990,7 +994,7 @@ class _Parser {
       final lookStart = rx(l, r'look at the top (\w+) cards of your library(?:, where x is (.+))?');
       if (lookStart != null) {
         flushLook();
-        final n = lookStart[1] == 'x' ? countAmount(lookStart[2]) : amount(lookStart[1]);
+        final n = lookStart[1] == 'x' ? amountPhrase(lookStart[2]) : amount(lookStart[1]);
         if (n == null) {
           bad.add(sentence);
           continue;
@@ -1731,22 +1735,24 @@ class _Parser {
     if (l == 'you lose the game') return const [LoseGame()];
     if (l == 'you win the game') return const [WinGame()];
     if (l == 'draw that many cards') return const [Draw(Amount.counted(AmountKind.eventAmount), Target.you)];
-    if (l == 'when that creature dies this turn, you draw a card')
-      return const [
-        Delayed(DelayedEventKind.lastTouchedDies, [Draw(Amount.one, Target.you)]),
-      ];
+    if (l == 'when that creature dies this turn, you draw a card') return const [Delayed(DelayedEventKind.lastTouchedDies, [Draw(Amount.one, Target.you)])];
     if (l == 'if that creature would die this turn, exile it instead') return const [ExileIfDiesThisTurn(Target.lastTarget)];
     if (l == 'until end of turn, it gets +1/+1 and becomes a doctor') return const [Pump(1, 1, Target.lastTarget, EffectDuration.endOfTurn), BecomeType('Doctor', Target.lastTarget, replace: true)];
-    if (l == 'draw a card if you control a permanent with a counter on it')
-      return const [
-        Conditional(Condition.controlPermanentWithCounter, [Draw(Amount.one, Target.you)]),
-      ];
+    if (l == 'draw a card if you control a permanent with a counter on it') return const [Conditional(Condition.controlPermanentWithCounter, [Draw(Amount.one, Target.you)])];
     if (l == "look at target opponent's hand") return [HandChoice(ChosenTarget(Filter.opponent), CardPred.any, lookOnly: true)];
     if (l == 'double the number of +1/+1 counters on each creature you control') return [DoubleCounters(EachTarget(Filter(FilterKind.creature, controller: Controller.you)))];
     if (l == 'destroy each nonland permanent with mana value equal to the number of charge counters on ~') return const [DestroyNonlandWithManaValue(Amount.counted(AmountKind.eventAmount))];
     if (l == "create a tapped token that's a copy of target token you control") return [CopyToken(ChosenTarget(Filter(FilterKind.token, controller: Controller.you)), const [], tapped: true)];
-    if (l == 'choose a color. add an amount of mana of that color equal to the number of creature types among non-borg creatures you control' || l == 'choose a color') {
+    // The color is chosen as the mana is added.
+    if (l == 'choose a color') return const [];
+    if (l == 'add an amount of mana of that color equal to the number of creature types among non-borg creatures you control') {
       return const [AddManaOfChosenColor(Amount.counted(AmountKind.creatureTypesNonBorg))];
+    }
+    if (l == 'exile the top card of your library') return const [ExileTopPlayable(Amount.one)];
+    if ((m = rx(l, r'they lose (\d+) life')) != null) return [LoseLife(Amount.fixed(int.parse(m![1])), Target.lastTarget)];
+    if ((m = rx(l, r'put a \+1/\+1 counter on each (\w+) you control')) != null && !const ['creature', 'artifact', 'permanent'].contains(m![1])) {
+      final f = Filter(FilterKind.creature, controller: Controller.you)..subtype = m[1][0].toUpperCase() + m[1].substring(1);
+      return [AddCounters(CounterKind.plusOne, Amount.one, EachTarget(f))];
     }
     if ((m = rx(l, r'lose (\d+) life')) != null) return [LoseLife(Amount.fixed(int.parse(m![1])), Target.you)];
     if ((m = rx(l, r"~'s base power and toughness become (\d+)/(\d+)")) != null) return [SetBasePT(int.parse(m![1]), int.parse(m[2]))];

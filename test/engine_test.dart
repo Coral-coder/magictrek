@@ -376,5 +376,114 @@ void main() {
       expect(game.characteristics(id).has(KeywordKind.flying), isTrue);
       expect(game.characteristics(id).power, 3);
     });
+    /// Puts a card straight onto player `p`'s battlefield, past summoning sickness.
+    ObjectID putOnTable(Game game, PlayerID p, String name) {
+      final id = game.newObject(cardID: db.byName(name)!.id, owner: p, zone: Zone.hand);
+      game.move(id, Zone.battlefield, controller: p);
+      game.state.objects[id]!.enteredTurn = -5;
+      return id;
+    }
+
+    int abilityIndex(Game game, ObjectID id) {
+      final all = game.abilitiesIn(game.state.objects[id]!);
+      return all.indexWhere((a) => a is Activated);
+    }
+
+    test('Captain Picard taps seven Officers to fetch a Spacecraft with seven charge counters', () {
+      final game = makeGame([]);
+      final picard = putOnTable(game, 0, 'Captain Jean-Luc Picard');
+      final ship = game.newObject(cardID: db.byName('Suurok-Class Science Vessel')!.id, owner: 0, zone: Zone.library);
+      game.state.players[0].library.add(ship);
+      final officer = TokenSpec(name: 'Officer', power: 1, toughness: 1, colors: [ManaColor.red], subtypes: ['Officer']);
+      for (var i = 0; i < 6; i++) {
+        game.createToken(officer, 0);
+      }
+      final index = abilityIndex(game, picard);
+      // Picard is an Officer too: six tokens plus Picard make seven.
+      expect(game.activationProblem(picard, index, 0), isNull);
+      game.state.objects[picard]!.tapped = true;
+      expect(game.activationProblem(picard, index, 0), isNotNull, reason: 'only six untapped Officers');
+      game.state.objects[picard]!.tapped = false;
+      game.createToken(officer, 0);
+      game.apply(ActivateAbilityAction(picard, index));
+      expect(game.state.objects[ship]!.zone, Zone.battlefield);
+      expect(game.state.objects[ship]!.chargeCounters, 7);
+      expect(game.state.permanentsOf(0).where((o) => o.isToken && o.tapped).length, 7);
+      expect(game.state.objects[picard]!.tapped, isFalse, reason: 'the least valuable Officers are tapped first');
+    });
+
+    test('Lieutenant Commander Data removes three counters from among creatures to draw', () {
+      final game = makeGame([]);
+      giveLands(game, 0, 'Island', 1);
+      final data = putOnTable(game, 0, 'Lieutenant Commander Data');
+      final index = abilityIndex(game, data);
+      game.state.objects[data]!.counters[CounterKind.plusOne] = 2;
+      expect(game.activationProblem(data, index, 0), isNotNull, reason: 'only two counters');
+      game.state.objects[data]!.counters[CounterKind.plusOne] = 4;
+      final hand = game.state.players[0].hand.length;
+      game.apply(ActivateAbilityAction(data, index));
+      expect(game.state.objects[data]!.counters[CounterKind.plusOne], 1);
+      expect(game.state.players[0].hand.length, hand + 1);
+    });
+
+    test('Relentless Drednok exiles itself from the graveyard to draw', () {
+      final game = makeGame([]);
+      giveLands(game, 0, 'Swamp', 3);
+      final id = game.newObject(cardID: db.byName('Relentless Drednok')!.id, owner: 0, zone: Zone.graveyard);
+      game.state.players[0].graveyard.add(id);
+      final index = abilityIndex(game, id);
+      expect(game.activationProblem(id, index, 0), isNull);
+      final hand = game.state.players[0].hand.length, life = game.state.players[0].life;
+      game.apply(ActivateAbilityAction(id, index));
+      expect(game.state.objects[id]!.zone, Zone.exile);
+      expect(game.state.players[0].hand.length, hand + 1);
+      expect(game.state.players[0].life, life - 1);
+    });
+
+    test('Locutus is discarded from hand to deal 2 damage', () {
+      final game = makeGame([db.byName('Locutus, the One Who Speaks')!.id]);
+      giveLands(game, 0, 'Plains', 1);
+      giveLands(game, 0, 'Swamp', 1);
+      final enemy = putOnTable(game, 1, 'Relentless Drednok');
+      final locutus = game.state.players[0].hand.first;
+      final index = abilityIndex(game, locutus);
+      final life = game.state.players[0].life;
+      game.apply(ActivateAbilityAction(locutus, index, targets: [enemy]));
+      expect(game.state.objects[locutus]!.zone, Zone.graveyard);
+      expect(game.state.objects[enemy]!.zone, Zone.graveyard);
+      expect(game.state.players[0].life, life + 2);
+      expect(game.activationProblem(locutus, index, 0), isNotNull, reason: 'only from the hand');
+    });
+
+    test('Commander Spock casts the top card free when the lands allow it', () {
+      final game = makeGame([]);
+      giveLands(game, 0, 'Plains', 1);
+      giveLands(game, 0, 'Island', 1);
+      final drednok = game.newObject(cardID: db.byName('Relentless Drednok')!.id, owner: 0, zone: Zone.library);
+      game.state.players[0].library.insert(0, drednok);
+      final spock = game.newObject(cardID: db.byName('Commander Spock')!.id, owner: 0, zone: Zone.hand);
+      game.move(spock, Zone.battlefield, controller: 0);
+      game.fireTriggers(SimpleTrigger.enters, spock);
+      passWindows(game);
+      expect(game.state.objects[drednok]!.zone, Zone.battlefield, reason: 'mana value 1 <= 2 differently named lands');
+    });
+
+    test('Peace in Our Time: drawing stops the attack and wins only at twelve counters', () {
+      final game = makeGame([]);
+      final peace = putOnTable(game, 1, 'Peace in Our Time');
+      game.state.players[0].isBot = true; // the bot decides whether to accept
+      game.apply(const EndTurnAction());
+      passWindows(game);
+      expect(game.state.isOver, isFalse, reason: 'no win without twelve peace counters');
+      game.state.objects[peace]!.counters[CounterKind.peace] = 12;
+      game.apply(const EndTurnAction());
+      passWindows(game);
+      if (game.state.pending != null && game.state.pending!.decision is DiscardToHandSizeDecision) {
+        game.apply(RespondAction(CardsResponse(game.state.players[1].hand.take(1).toList())));
+      }
+      game.apply(const EndTurnAction());
+      passWindows(game);
+      expect(game.state.winner, 1);
+    });
   });
 }

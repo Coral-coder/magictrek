@@ -315,7 +315,7 @@ class _GameScreenState extends State<GameScreen> {
   void beginCast(ObjectID id, {required bool kicked, int? mode}) {
     final card = game.card(id);
     if (card == null) return;
-    final reqs = game.targetRequirementsForCard(card, mode).where((r) => game.legalTargets(r.filter, me, id).isNotEmpty).toList();
+    final reqs = game.targetRequirementsForCard(card, mode, kicked: kicked).where((r) => game.legalTargets(r.filter, me, id).isNotEmpty).toList();
     if (reqs.isEmpty) {
       perform(CastAction(id, kicked: kicked, mode: mode));
     } else {
@@ -429,7 +429,7 @@ class _GameScreenState extends State<GameScreen> {
     if (equip != null && state.phase.isMain) {
       items.add(_sheetButton('Equip $equip', () => setState(() => interaction = Equipping(id)), color: LCARS.gold, enabled: game.canPay(equip, me)));
     }
-    if ((state.phase == Phase.main1 || state.phase == Phase.declareAttackers) && game.canAttack(id)) {
+    if ((state.phase == Phase.main1 || state.phase == Phase.beginCombat || state.phase == Phase.declareAttackers) && game.canAttack(id)) {
       items.add(_sheetButton('Attack with this', () => setState(() => interaction = Attacking({id})), color: LCARS.alert));
     }
     items.add(_sheetButton('Inspect', () => inspect(id), color: LCARS.lavender));

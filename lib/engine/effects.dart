@@ -368,6 +368,7 @@ extension GameEffects on Game {
       case Mill x:
         final ids = targets(x.target, '$srcName: who mills');
         if (ids == null) return false;
+        ctx.affected = [];
         for (final id in ids) {
           final p = EffectContext.playerFromObject(id);
           if (p == null) continue;
@@ -376,6 +377,7 @@ extension GameEffects on Game {
             if (lib.isEmpty) break;
             final top = lib.first;
             move(top, Zone.graveyard);
+            ctx.affected.add(top);
             log(GameEvent('milled', player: p, object: top));
           }
         }
@@ -444,7 +446,7 @@ extension GameEffects on Game {
         for (final id in ids) {
           final p = EffectContext.playerFromObject(id);
           if (p == null) continue;
-          final candidates = state.permanentsOf(p).where((o) => matches(x.filter, o.id, p, null)).map((o) => o.id).toList();
+          final candidates = state.permanentsOf(p).where((o) => matches(x.filter, o.id, p, source)).map((o) => o.id).toList();
           if (candidates.isEmpty) continue;
           if (!state.players[p].isBot && candidates.length > 1) {
             state.pending = PendingDecision(
@@ -456,6 +458,7 @@ extension GameEffects on Game {
             return true;
           }
           final chosen = candidates.length == 1 ? candidates[0] : Bot.sacrificeChoice(this, candidates);
+          ctx.sacrificedSubtypes.addAll(characteristics(chosen).subtypes);
           dies(chosen);
           any = true;
         }

@@ -6,9 +6,11 @@ extension GameCombat on Game {
     if (!(state.phase == Phase.main1 || state.phase == Phase.declareAttackers || state.phase == Phase.beginCombat)) throw GameError('Not the time to attack');
     if (state.phase == Phase.main1) {
       state.phase = Phase.beginCombat;
-      for (final o in state.permanentsOf(p)) {
-        fireTriggers(SimpleTrigger.beginCombat, o.id);
-      }
+      log(GameEvent('phase', phase: Phase.beginCombat));
+      _beginCombatTriggers();
+      // A beginning-of-combat trigger asked a question (Peace in Our Time): attackers are
+      // declared again once it's answered, since the answer can change who may attack.
+      if (state.pending != null) return;
     }
     final attackers = <ObjectID>[];
     for (final id in ids) {
@@ -38,8 +40,15 @@ extension GameCombat on Game {
       }
     }
     log(GameEvent('attackersDeclared', player: p, ids: List.of(attackers)));
+    state.players[p].opponentsAttackedThisTurn = 1;
+    for (final o in state.permanentsOf(p)) {
+      fireTriggers(SimpleTrigger.youAttack, o.id);
+    }
     for (final id in attackers) {
       fireTriggers(SimpleTrigger.attacks, id);
+      for (final e in state.permanentsOf(p).where((e) => e.attachedTo == id).toList()) {
+        fireTriggers(SimpleTrigger.equippedAttacks, e.id, touched: id);
+      }
     }
     state.turnContinuation.add(TurnStep.attackWindow);
     state.turnContinuation.add(TurnStep.blockers);
@@ -76,6 +85,7 @@ extension GameCombat on Game {
     }
     for (final e in counts.entries) {
       if (characteristics(e.key).has(KeywordKind.menace) && e.value < 2) throw GameError('${name(e.key)} needs two blockers');
+      if (characteristics(e.key).has(KeywordKind.oneBlocker) && e.value > 1) throw GameError("${name(e.key)} can't be blocked by more than one creature");
     }
     state.combat.blockers = Map.of(blocks);
     for (final e in sortedBlocks) {
@@ -163,13 +173,19 @@ extension GameCombat on Game {
         pending.add((pw < 0 ? 0 : pw, e.value, e.key));
       }
     }
-    final damagedPlayerBy = <ObjectID>[];
+    final damagedPlayerBy = <ObjectID, int>{};
     for (final (amount, target, source) in pending) {
       final dealt = dealDamage(amount, target, source);
-      if (dealt > 0 && EffectContext.playerFromObject(target) != null && source != null) damagedPlayerBy.add(source);
+      if (dealt > 0 && EffectContext.playerFromObject(target) != null && source != null) damagedPlayerBy[source] = (damagedPlayerBy[source] ?? 0) + dealt;
     }
-    for (final s in damagedPlayerBy) {
-      fireTriggers(SimpleTrigger.combatDamageToPlayer, s);
+    for (final e in damagedPlayerBy.entries) {
+      fireTriggers(SimpleTrigger.combatDamageToPlayer, e.key, amount: e.value);
+      final hitter = state.objects[e.key];
+      if (hitter != null && hitter.counters.values.any((n) => n > 0)) {
+        for (final o in state.permanentsOf(hitter.controller)) {
+          fireTriggers(SimpleTrigger.counteredCreatureHitsPlayer, o.id, touched: e.key, amount: e.value);
+        }
+      }
     }
   }
 }

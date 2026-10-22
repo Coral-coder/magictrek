@@ -548,12 +548,15 @@ extension GameQueries on Game {
     return parsedOf(o)?.abilities ?? const [];
   }
 
-  /// The permanents a "tap N untapped …" cost would tap: the least valuable ones, never the source.
+  /// The permanents a "tap N untapped …" cost would tap: tokens first, then the weakest. The
+  /// source counts when it fits (Picard is an Officer); summoning sickness doesn't matter, since
+  /// the cost isn't {T}.
   List<ObjectID>? tapOthersChoice(ActivationCost cost, PlayerID p, ObjectID source) {
     final f = cost.tapOthersFilter;
     if (cost.tapOthers == 0 || f == null) return const [];
-    final ready = state.permanentsOf(p).where((o) => o.id != source && !o.tapped && matches(f, o.id, p, source)).toList()
+    final ready = state.permanentsOf(p).where((o) => !o.tapped && matches(f, o.id, p, source)).toList()
       ..sort((a, b) {
+        if (a.isToken != b.isToken) return a.isToken ? -1 : 1;
         final pa = characteristics(a.id).power, pb = characteristics(b.id).power;
         return pa != pb ? pa - pb : a.id - b.id;
       });
@@ -657,8 +660,10 @@ extension GameQueries on Game {
     final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
     final modes = modal == null ? <int?>[null] : List<int?>.generate(modal.modes.length, (i) => i);
     for (final m in modes) {
-      final reqs = targetRequirementsForCard(card, m);
-      if (reqs.every((r) => r.optional || legalTargets(r.filter, p, id).isNotEmpty)) return true;
+      for (final kicked in [false, if (parsed.kicker != null) true]) {
+        final reqs = targetRequirementsForCard(card, m, kicked: kicked);
+        if (reqs.every((r) => r.optional || legalTargets(r.filter, p, id).isNotEmpty)) return true;
+      }
     }
     return false;
   }
@@ -674,7 +679,9 @@ extension GameQueries on Game {
   int landsAllowed(PlayerID p) => 1 + state.permanentsOf(p).where((o) => parsedOf(o)?.statics.contains(SimpleStatic.extraLandEachTurn) == true).length;
 
   /// The spell's targets the caster must pick, in order: each `ChosenTarget` in its effects.
-  List<TargetRequirement> targetRequirementsForCard(Card card, int? mode) {
+  /// Kicked, a spell whose "instead" text names its own target (Highly Illogical) asks for that
+  /// one; one that reuses "that creature" (Burst Lightning) keeps the unkicked target.
+  List<TargetRequirement> targetRequirementsForCard(Card card, int? mode, {bool kicked = false}) {
     final parsed = db.parsed(card);
     var effects = parsed.spellEffects;
     if (parsed.isAura) return [TargetRequirement(Filter.creature, 1, false)];
@@ -682,7 +689,15 @@ extension GameQueries on Game {
       final modal = effects.whereType<Modal>().firstOrNull;
       if (modal != null && mode < modal.modes.length) effects = modal.modes[mode];
     }
-    return targetRequirementsIn(effects);
+    final i = effects.indexWhere((e) => e is KickedInstead);
+    if (i < 0) return targetRequirementsIn(effects);
+    final unkicked = [...effects.sublist(0, i), ...effects.sublist(i + 1)];
+    if (kicked) {
+      final instead = [...(effects[i] as KickedInstead).effects, ...effects.sublist(i + 1)];
+      final own = targetRequirementsIn(instead);
+      if (targetRequirementsIn((effects[i] as KickedInstead).effects).isNotEmpty) return own;
+    }
+    return targetRequirementsIn(unkicked);
   }
 
   List<TargetRequirement> targetRequirementsIn(List<Effect> effects) {
@@ -757,8 +772,6 @@ extension GameQueries on Game {
         case Optional x:
           out.addAll(targetRequirementsIn(x.effects));
         case IfDidPrevious x:
-          out.addAll(targetRequirementsIn(x.effects));
-        case KickedInstead x:
           out.addAll(targetRequirementsIn(x.effects));
         case Conditional x:
           out.addAll(targetRequirementsIn(x.effects));
