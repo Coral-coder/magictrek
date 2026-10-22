@@ -43,7 +43,7 @@ sealed class GameAction with Props {
       case 'endTurn':
         return const EndTurnAction();
       case 'concede':
-        return const ConcedeAction();
+        return ConcedeAction(j['p'] as int?);
       case 'timeout':
         return TimeOutAction(j['p'] as int);
     }
@@ -168,12 +168,15 @@ class EndTurnAction extends GameAction {
   Map<String, dynamic> toJson() => {'t': 'endTurn'};
 }
 
+/// A player gives up, at any time (not only on their move). [player] says who; without it, the
+/// player whose turn it is (how older logs recorded it).
 class ConcedeAction extends GameAction {
-  const ConcedeAction();
+  const ConcedeAction([this.player]);
+  final PlayerID? player;
   @override
-  List<Object?> get props => const [];
+  List<Object?> get props => [player];
   @override
-  Map<String, dynamic> toJson() => {'t': 'concede'};
+  Map<String, dynamic> toJson() => {'t': 'concede', if (player != null) 'p': player};
 }
 
 class TimeOutAction extends GameAction {

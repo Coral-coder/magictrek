@@ -243,7 +243,7 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
     final store = AppStore.shared;
     final d = deck;
     if (d == null) return;
-    final match = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost, rules: store.rules);
+    final match = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost, rules: store.rules, archive: store);
     late StreamSubscription sub;
     sub = match.events.listen((e) {
       if (e == 'start' || (e == 'hello' && match.game != null)) {
@@ -390,7 +390,17 @@ class _RemoteLobbyScreenState extends State<RemoteLobbyScreen> {
     transport = t;
     relaySub?.cancel();
     relaySub = t.relayStatus.listen((m) => setState(() => relaysUp = m.values.where((v) => v).length));
-    final m = LockstepMatch(transport: t, db: store.db, localName: store.playerName, localId: store.deviceId, localDeck: d.cardList, isHost: isHost, rules: store.rules);
+    final m = LockstepMatch(
+      transport: t,
+      db: store.db,
+      localName: store.playerName,
+      localId: store.deviceId,
+      localDeck: d.cardList,
+      isHost: isHost,
+      rules: store.rules,
+      matchKey: 'relay:$code',
+      archive: store,
+    );
     match = m;
     setState(() {
       hostedCode = isHost ? code : null;
@@ -411,6 +421,12 @@ class _RemoteLobbyScreenState extends State<RemoteLobbyScreen> {
       }
     });
     m.begin();
+    // A game saved on this device opens at once; the other player's moves arrive when they're online.
+    if (m.game != null) {
+      store.startLinkedGame(m);
+      Console.shared.play(Fx.confirm);
+      if (mounted) Navigator.pushReplacementNamed(context, '/game');
+    }
   }
 
   @override

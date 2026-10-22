@@ -29,8 +29,9 @@ class Game {
         _start(a.decks);
       case RespondAction a:
         _respond(a.response);
-      case ConcedeAction _:
-        _lose(state.activePlayer, '${state.players[state.activePlayer].name} conceded');
+      case ConcedeAction a:
+        final who = a.player ?? state.activePlayer;
+        _lose(who, '${state.players[who].name} conceded');
       case TimeOutAction a:
         _lose(a.player, '${state.players[a.player].name} ran out of time');
       default:
@@ -85,8 +86,9 @@ class Game {
       case StartAction _:
       case TimeOutAction _:
         break;
-      case ConcedeAction _:
-        _lose(player, '${state.players[player].name} conceded');
+      case ConcedeAction a:
+        // Recorded with the player, so every device that replays it agrees on who gave up.
+        apply(ConcedeAction(a.player ?? player));
         return;
       default:
         if (state.playerToAct != player) throw GameError('Not your move');

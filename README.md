@@ -59,6 +59,13 @@ picks the seed, both sides exchange decks, and from then on each move is a numbe
   This is the one mode the browser build has (a web page can't open Bluetooth or raw TCP), and a
   browser can play a phone.
 
+Every move is saved on both devices as it is made (the deal, each move, and a fingerprint of the
+game after it). When the devices reconnect, after a crash, a closed app or a dropped link, they swap
+their fingerprints and find the last move they agree on. A device that is behind fetches what it
+lacks. If the histories split, the host's moves stand: the other device goes back to the last
+shared move and takes them, and the table says so. Each move also names the position it was made
+from, so a move is never applied on top of a different history.
+
 Turn notifications are local: when a move arrives (or the computer finishes) while the app is in
 the background, the phone shows "Your move". There is no push service, so the app has to be
 running (foreground or background) to notice a remote move.
