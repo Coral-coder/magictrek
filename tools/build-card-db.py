@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds Packages/MagicTrekCore/Sources/CardKit/Resources/cards.json: one entry per card image in cards/, with the card's
+"""Builds assets/cards.json: one entry per card image in cards/, with the card's
 rules data from Scryfall (sets trk = Star Trek, trc = Star Trek Commander) joined to it by name.
 Cards Scryfall has no record for are filled in from tools/card-overrides.json.
 
@@ -12,7 +12,7 @@ import argparse, difflib, json, os, re, sys, time, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CARDS_DIR = os.path.join(ROOT, "cards")
-OUT = os.path.join(ROOT, "Packages", "MagicTrekCore", "Sources", "CardKit", "Resources", "cards.json")
+OUT = os.path.join(ROOT, "assets", "cards.json")
 OVERRIDES = os.path.join(ROOT, "tools", "card-overrides.json")
 SETS = ["trk", "trc"]
 UA = "magictrek-card-db/1.0 (https://github.com/coral-coder/magictrek)"

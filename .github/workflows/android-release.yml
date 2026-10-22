@@ -1,0 +1,89 @@
+# Builds the release APK and attaches it to a GitHub Release.
+#   push a tag like v1.2.0        -> release "v1.2.0" with the APK
+#   *u in a commit subject on main -> pre-release "build-<n>" with the APK (the same marker that
+#                                     sends the iOS build to TestFlight)
+#   Run workflow                   -> pre-release "build-<n>"
+# Signing: with the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
+# ANDROID_KEY_PASSWORD secrets the APK is signed with that key; without them it is signed with the
+# debug key, which installs fine when sideloaded but can't be updated later by a differently
+# signed build.
+name: Android release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      tag: ${{ steps.plan.outputs.tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          go=false; tag=""; prerelease=true
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then go=true; tag="$GITHUB_REF_NAME"; prerelease=false
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then go=true; tag="build-$GITHUB_RUN_NUMBER"
+          else
+            case "$(git log -1 --format=%s)" in *'*u'*) go=true; tag="build-$GITHUB_RUN_NUMBER" ;; esac
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "go=$go tag=$tag prerelease=$prerelease"
+
+  apk:
+    needs: plan
+    if: needs.plan.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Release keystore (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "Signing with the release keystore"
+          else
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret; the APK is signed with the debug key"
+          fi
+      - run: flutter pub get
+      - name: Build
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          version="${{ needs.plan.outputs.tag }}"
+          name=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)
+          case "$version" in v*) name="${version#v}" ;; esac
+          flutter build apk --release --build-name "$name" --build-number "$GITHUB_RUN_NUMBER"
+          cp build/app/outputs/flutter-apk/app-release.apk "MagicTrek-$version.apk"
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.plan.outputs.tag }}
+          name: MagicTrek ${{ needs.plan.outputs.tag }}
+          prerelease: ${{ needs.plan.outputs.prerelease }}
+          generate_release_notes: true
+          files: MagicTrek-${{ needs.plan.outputs.tag }}.apk
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore"

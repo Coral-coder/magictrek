@@ -12,7 +12,8 @@
 # are optional overrides.
 #
 # The project is found on its own: the first *.xcodeproj within three folders of the repo root
-# (or an XcodeGen project.yml, which is generated first). The scheme defaults to the project's
+# (or an XcodeGen project.yml, which is generated first). A Flutter app (pubspec.yaml at the root)
+# gets the Flutter SDK installed and `flutter build ios` run first; its project is ios/Runner. The scheme defaults to the project's
 # name and the bundle ID to the scheme's PRODUCT_BUNDLE_IDENTIFIER. Override any of them with
 # repository variables (Settings → Secrets and variables → Actions → Variables):
 #   IOS_DIR, XCODE_PROJECT, XCODE_SCHEME, BUNDLE_ID, APP_NAME (App Store name), APP_SKU
@@ -196,6 +197,23 @@ jobs:
         if: hashFiles('scripts/fetch-libsignal-ffi.sh') != ''
         run: scripts/fetch-libsignal-ffi.sh
 
+      # A Flutter app: the Xcode project is ios/Runner and needs the Flutter SDK, pub packages and
+      # CocoaPods set up before xcodebuild can archive it.
+      - name: Set up Flutter
+        if: hashFiles('pubspec.yaml') != ''
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Prepare the Flutter iOS build
+        if: hashFiles('pubspec.yaml') != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign --build-name "${INPUT_VERSION:-$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)}" --build-number "$GITHUB_RUN_NUMBER"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+
       - name: Find the project, scheme and bundle ID
         env:
           XCODE_PROJECT: ${{ vars.XCODE_PROJECT }}
@@ -214,6 +232,9 @@ jobs:
             fi
           fi
           if [ -z "$project" ] || [ ! -d "$project" ]; then echo "::error::No Xcode project in $(pwd)"; exit 1; fi
+          # CocoaPods (Flutter plugins) means building the workspace, not the project.
+          workspace="${project%.xcodeproj}.xcworkspace"
+          if [ -d "$workspace" ]; then echo "WORKSPACE=$workspace" >> "$GITHUB_ENV"; echo "Using workspace $workspace"; fi
           schemes=$(xcodebuild -project "$project" -list -json | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["project"].get("schemes", [])))')
           scheme="$XCODE_SCHEME"
           if [ -z "$scheme" ]; then
@@ -245,6 +266,11 @@ jobs:
           pbxproj="$PROJECT/project.pbxproj"
           current_version=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION = "?([^";]+)"?;/\1/p' "$pbxproj" | sort -V | tail -1)
           current_build=$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION = "?([0-9]+)"?;/\1/p' "$pbxproj" | sort -n | tail -1)
+          if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then
+            # Flutter keeps the version in pubspec.yaml ("version: 1.2.0+7").
+            current_version=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' "$GITHUB_WORKSPACE/pubspec.yaml")
+            current_build=$(sed -nE 's/^version: [0-9.]+\+([0-9]+).*/\1/p' "$GITHUB_WORKSPACE/pubspec.yaml")
+          fi
           current_version="${current_version:-1.0}"; current_build="${current_build:-0}"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
@@ -335,7 +361,7 @@ jobs:
         run: |
           mkdir -p build
           archive() {
-            xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            xcodebuild ${WORKSPACE:+-workspace "$WORKSPACE"} ${WORKSPACE:--project "$PROJECT"} -scheme "$SCHEME" -configuration Release \
               -destination 'generic/platform=iOS' -archivePath "build/$SCHEME.xcarchive" \
               -allowProvisioningUpdates \
               -authenticationKeyPath "$ASC_KEY_PATH" \
@@ -409,6 +435,15 @@ jobs:
           if [ "$GITHUB_REF_TYPE" != "branch" ]; then branch=main; fi
           git fetch origin "$branch"
           git checkout -B "$branch" "origin/$branch"
+          if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then
+            sed -i '' -E "s/^version: .*/version: $VERSION+$BUILD_NUMBER/" "$GITHUB_WORKSPACE/pubspec.yaml"
+            git add -- "$GITHUB_WORKSPACE/pubspec.yaml"
+            if git diff --cached --quiet; then exit 0; fi
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "TestFlight: $VERSION ($BUILD_NUMBER)"
+            git push origin "$branch"
+            exit 0
+          fi
           if [ -z "$(git ls-files -- "$PROJECT/project.pbxproj" project.yml)" ]; then echo "No tracked project file to record the version in"; exit 0; fi
           if [ -f "$PROJECT/project.pbxproj" ]; then
             sed -i '' -E "s/^([[:space:]]*MARKETING_VERSION = )[^;]*;/\1$VERSION;/" "$PROJECT/project.pbxproj"
