@@ -1,13 +1,20 @@
 # Publishes the MagicTrek landing page in site/ to GitHub Pages
-# (https://coral-coder.github.io/magictrek/).
+# (https://coral-coder.github.io/magictrek/) with the browser build of the game under play/.
 # The github-pages environment only accepts deployments from main, so the deploy job runs there
 # only. On any other branch the publish job asks main's copy of this workflow to publish the site
-# from that branch whenever site/ changes.
+# from that branch whenever site/ changes; game changes go live once they reach main.
 name: Website
 
 on:
   push:
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+      - "lib/**"
+      - "web/**"
+      - "assets/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
   workflow_dispatch:
     inputs:
       ref:
@@ -26,7 +33,21 @@ jobs:
     if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Skip unless the landing page changed
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null && git diff --quiet "$BEFORE" HEAD -- site .github/workflows/pages.yml; then
+            echo "site=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "site=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Ask main to publish this branch's site
+        if: steps.changed.outputs.site == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main -f ref="${GITHUB_REF_NAME}"
@@ -58,6 +79,16 @@ jobs:
           cp assets/icon.png _site/img/icon.png
           touch _site/.nojekyll
           ls -la _site _site/img
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Build the game for the browser
+        run: |
+          flutter pub get
+          flutter build web --release --base-href /magictrek/play/
+          cp -r build/web _site/play
+          du -sh _site/play
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

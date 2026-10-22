@@ -1,6 +1,7 @@
 # MagicTrek
 A Magic: The Gathering–style card game built on the Star Trek set, for iOS and Android from one
-Flutter codebase, with an LCARS interface. Play the computer, pass-and-play on one phone, play a
+Flutter codebase, with an LCARS interface, and in the browser at
+<https://coral-coder.github.io/magictrek/play/>. Play the computer, pass-and-play on one phone, play a
 friend nearby over Wi‑Fi or Bluetooth, or play anyone anywhere through public relays. No server.
 
 ## Layout
@@ -48,12 +49,15 @@ Every transport carries the same lockstep protocol (`lib/net/protocol.dart`); th
 picks the seed, both sides exchange decks, and from then on each move is a numbered action.
 
 - **Nearby, Wi‑Fi**: the host broadcasts on UDP port 47474; guests list the hosts they hear and
-  connect over TCP. If a network blocks broadcasts, the guest can type the host's `address:port`.
+  connect over TCP on port 47000. If a network blocks broadcasts, the host's screen shows its IP
+  address and the guest types it under *Join by IP address* (the port is optional).
 - **Nearby, Bluetooth**: the host advertises a GATT service; the guest scans and connects. One
   characteristic carries both directions, chunked to the link's MTU. Works with no network at all.
 - **Remote**: the host makes a 6-letter code. Both phones derive a room tag and an encryption key
   from it and talk through public Nostr relays (configurable in Settings). Relays keep the events,
   so a match can continue days later: open it again and it catches up. Nobody runs a server.
+  This is the one mode the browser build has (a web page can't open Bluetooth or raw TCP), and a
+  browser can play a phone.
 
 Turn notifications are local: when a move arrives (or the computer finishes) while the app is in
 the background, the phone shows "Your move". There is no push service, so the app has to be
@@ -62,7 +66,10 @@ running (foreground or background) to notice a remote move.
 ## Website
 
 `site/` is the landing page at <https://coral-coder.github.io/magictrek/> (download links, QR code,
-latest release). `.github/workflows/pages.yml` publishes it to GitHub Pages whenever it changes.
+latest release, and a *Play online now* button at the bottom). `.github/workflows/pages.yml`
+publishes it to GitHub Pages with `flutter build web --base-href /magictrek/play/` under `play/`,
+whenever the site or the game changes on main. The engine's shuffler uses exact 64-bit arithmetic
+(`package:fixnum`) so the browser and the phones deal the same cards.
 
 ## Rules options
 

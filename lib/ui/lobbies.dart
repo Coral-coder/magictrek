@@ -155,7 +155,14 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
       await h.start(name: store.playerName, id: store.deviceId);
       host = h;
       _subs.add(h.connections.listen(_onConnected));
-      setState(() => status = kind == LinkKind.lan ? 'Hosting on Wi‑Fi as ${store.playerName}${h is LanHost ? ' (port ${h.port})' : ''}. Waiting for a player…' : 'Hosting over Bluetooth as ${store.playerName}. Waiting for a player…');
+      if (h is LanHost) {
+        // Tell the host what the guest can type, in case discovery doesn't reach them.
+        final addresses = await localAddresses();
+        final where = addresses.map((a) => h.port == lanGamePort ? a : '$a:${h.port}').join(' or ');
+        setState(() => status = 'Hosting on Wi‑Fi as ${store.playerName}. Waiting for a player…${where.isEmpty ? '' : '\nYour opponent can also join by typing: $where'}');
+      } else {
+        setState(() => status = 'Hosting over Bluetooth as ${store.playerName}. Waiting for a player…');
+      }
     } catch (e) {
       setState(() {
         hosting = false;
@@ -206,9 +213,10 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
 
   Future<void> joinAddress() async {
     final text = addressController.text.trim();
-    final parts = text.split(':');
-    if (parts.length != 2 || int.tryParse(parts[1]) == null) {
-      setState(() => status = 'Enter host:port, e.g. 192.168.1.20:47000');
+    // "192.168.1.20" or "192.168.1.20:47000": the port is optional.
+    final parts = text.contains(':') ? text.split(':') : [text, '$lanGamePort'];
+    if (parts.length != 2 || parts[0].isEmpty || int.tryParse(parts[1]) == null) {
+      setState(() => status = 'Type the host\'s IP address, e.g. 192.168.1.20 (or 192.168.1.20:47000)');
       return;
     }
     setState(() {
@@ -317,18 +325,21 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
               }),
         for (final p in peers) Padding(padding: const EdgeInsets.only(top: 6), child: LcarsButton('${p.name}  ·  ${p.kind == LinkKind.lan ? p.address : 'Bluetooth'}', icon: Icons.login, color: LCARS.ice, onPressed: busy ? null : () => join(p))),
         if (kind == LinkKind.lan) ...[
-          const SizedBox(height: 8),
+          const LcarsHeader('Join by IP address', color: LCARS.ice),
+          Text('If the host doesn\'t show up above, type the address shown on their screen.', style: LCARS.label),
+          const SizedBox(height: 6),
           Row(children: [
             Expanded(
               child: TextField(
                 controller: addressController,
                 style: LCARS.body,
                 keyboardType: TextInputType.url,
-                decoration: const InputDecoration(isDense: true, filled: true, fillColor: LCARS.panel, border: OutlineInputBorder(borderSide: BorderSide.none), hintText: 'or host address:port'),
+                decoration: const InputDecoration(filled: true, fillColor: LCARS.panel, border: OutlineInputBorder(borderSide: BorderSide.none), hintText: '192.168.1.20'),
+                onSubmitted: (_) => busy || deck == null ? null : joinAddress(),
               ),
             ),
             const SizedBox(width: 6),
-            SizedBox(width: 80, child: LcarsButton('Join', height: 36, color: LCARS.lavender, fill: false, onPressed: busy || deck == null ? null : joinAddress)),
+            SizedBox(width: 90, child: LcarsButton('Join', height: 46, color: LCARS.ice, onPressed: busy || deck == null ? null : joinAddress)),
           ]),
         ],
         if (status.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 10), child: Row(children: [if (hosting || scanning || busy) const Padding(padding: EdgeInsets.only(right: 8), child: ScanLine()), Expanded(child: Text(status, style: LCARS.label.copyWith(color: LCARS.gold)))])),

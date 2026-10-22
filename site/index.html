@@ -104,6 +104,9 @@
   ol.steps li { background: var(--panel); border-radius: 14px; padding: 16px 16px 16px 64px; position: relative; font-size: 15px; line-height: 1.45; }
   ol.steps li::before { counter-increment: s; content: counter(s, decimal-leading-zero); position: absolute; left: 14px; top: 12px; font-size: 30px; color: var(--c, var(--blue)); font-weight: 700; }
 
+  .play { text-align: center; padding: 28px 0 8px; }
+  .play p { max-width: 560px; margin: 0 auto 18px; }
+  .play .btn { height: 64px; padding: 0 34px; font-size: 20px; }
   footer { margin-top: 20px; color: var(--gray); font-size: 13px; line-height: 1.5; border-top: 2px solid var(--panel); padding-top: 14px; }
   footer .bottom { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: end; margin-top: 10px; }
   footer .bottom .corner { background: var(--butter); height: 36px; border-radius: 0 0 0 28px; }
@@ -208,11 +211,19 @@
       <section>
         <div class="head" style="--c: var(--blue)"><h2>Engage</h2></div>
         <ol class="steps" style="--c: var(--blue)">
-          <li><b>Install.</b> Android: scan the code or tap the APK button, open the download, allow installs from your browser once. iPhone: TestFlight link coming soon.</li>
+          <li><b>Install.</b> Android: scan the code or tap the APK button, open the download, allow installs from your browser once. iPhone: scan the TestFlight code or tap the TestFlight button. No install at all: play online in your browser below.</li>
           <li><b>Pick a deck.</b> Six starter decks, one per faction, or build your own from the full set in the card database.</li>
-          <li><b>Find your opponent.</b> Nearby: one phone hosts, the other taps the host’s name. Remote: share the six‑letter code.</li>
+          <li><b>Find your opponent.</b> Nearby: one phone hosts, the other taps the host’s name or types the host’s IP address. Remote: share the match code; it works between the apps and the browser.</li>
           <li><b>Play.</b> Tap to target, drag nothing, argue about nothing: the engine enforces the rules on both phones at once.</li>
         </ol>
+      </section>
+
+      <section class="play" id="play">
+        <p>No install needed: the full game runs in your browser. Play the computer, take the tutorial, or create a match code and play a friend on a phone or another browser.</p>
+        <a class="btn" style="--c: var(--orange)" href="play/">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          <span>Play online now<small>In your browser</small></span>
+        </a>
       </section>
 
       <footer>

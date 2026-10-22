@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
@@ -247,12 +248,6 @@ class LockstepMatch {
 /// Six characters of letters and digits that are easy to read aloud.
 String newMatchCode([int length = 6]) {
   const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  final seed = DateTime.now().microsecondsSinceEpoch;
-  var x = seed;
-  final out = StringBuffer();
-  for (var i = 0; i < length; i++) {
-    x = (x * 6364136223846793005 + 1442695040888963407) & 0x7FFFFFFFFFFFFFFF;
-    out.write(letters[(x >> 33) % letters.length]);
-  }
-  return out.toString();
+  final random = Random.secure();
+  return String.fromCharCodes([for (var i = 0; i < length; i++) letters.codeUnitAt(random.nextInt(letters.length))]);
 }

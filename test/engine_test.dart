@@ -601,4 +601,22 @@ void main() {
       expect(game.state.players[0].life, life + 2, reason: 'first spell of the game');
     });
   });
+
+  // Lockstep needs every platform, the browser included, to draw the same numbers. These are the
+  // values the original native 64-bit implementation produced.
+  test('the shuffler draws the same sequence on every platform', () {
+    const expected = {
+      1: ([751136326, 474540717, 608844438, 442915363, 760308508, 62935516], [1, 5, 8, 9, 2, 6, 3, 0, 4, 7], '4990025626462012732'),
+      42: ([707901357, 478109794, 487777874, 813869659, 231233783, 259949967], [8, 0, 3, 2, 1, 7, 4, 9, 6, 5], '4990025626462012773'),
+      -7: ([771098569, 988079690, 459129697, 610529221, 476949243, 291716930], [0, 7, 2, 5, 3, 4, 6, 1, 9, 8], '4990025626462012724'),
+    };
+    expected.forEach((seed, want) {
+      final rng = SeededRng(seed);
+      expect([for (var i = 0; i < 6; i++) rng.nextInt(1000000007)], want.$1, reason: 'seed $seed');
+      final list = List.generate(10, (i) => i);
+      rng.shuffle(list);
+      expect(list, want.$2, reason: 'seed $seed');
+      expect(rng.state, want.$3, reason: 'seed $seed');
+    });
+  });
 }

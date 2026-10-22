@@ -12,6 +12,7 @@ dependencies:
   collection: ^1.19.1
   convert: ^3.1.2
   crypto: ^3.0.7
+  fixnum: ^1.1.1
   shared_preferences: ^2.5.6
   path_provider: ^2.1.6
   flutter_local_notifications: ^22.3.2
