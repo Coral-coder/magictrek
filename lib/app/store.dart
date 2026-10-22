@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -266,6 +267,13 @@ class AppStore extends ChangeNotifier implements MatchArchive {
   }
 
   Future<void> forgetRemoteMatch(String code) async {
+    // If that match is the game in progress here, close it: its link would otherwise stay open.
+    final s = session, link = s?.match;
+    if (s != null && link != null && link.transport is RelayTransport && (link.transport as RelayTransport).code == code) {
+      session = null;
+      s.dispose();
+      unawaited(link.dispose());
+    }
     remoteMatches.removeWhere((m) => m['code'] == code);
     await _prefs.setString('remoteMatches', jsonEncode(remoteMatches));
     await _prefs.remove('match:relay:$code');

@@ -380,6 +380,23 @@ class _RemoteLobbyScreenState extends State<RemoteLobbyScreen> {
     super.dispose();
   }
 
+  /// Removes a match from the list (and closes it if it is open here).
+  Future<void> forget(String code) async {
+    if (transport?.code == code && AppStore.shared.session?.match != match) {
+      await sub?.cancel();
+      await relaySub?.cancel();
+      sub = relaySub = null;
+      await match?.dispose();
+      match = null;
+      transport = null;
+      hostedCode = null;
+      relaysUp = 0;
+      status = '';
+    }
+    await AppStore.shared.forgetRemoteMatch(code);
+    if (mounted) setState(() {});
+  }
+
   Future<void> open(String code, {required bool isHost}) async {
     final store = AppStore.shared;
     final d = deck;
@@ -476,7 +493,11 @@ class _RemoteLobbyScreenState extends State<RemoteLobbyScreen> {
             padding: const EdgeInsets.only(bottom: 6),
             child: Row(children: [
               Expanded(child: LcarsButton('${m['code']}  ·  ${m['host'] == true ? 'hosted' : 'joined'}${m['opponent'] != null ? ' · vs ${m['opponent']}' : ''}', color: LCARS.skyBlue, fill: false, onPressed: deck == null ? null : () => open(m['code'] as String, isHost: m['host'] as bool))),
-              IconButton(icon: const Icon(Icons.close, color: LCARS.gray), onPressed: () => store.forgetRemoteMatch(m['code'] as String)),
+              IconButton(
+                icon: const Icon(Icons.close, color: LCARS.gray),
+                tooltip: 'Remove this match',
+                onPressed: () => forget(m['code'] as String),
+              ),
             ]),
           ),
         if (status.isNotEmpty)
