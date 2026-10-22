@@ -1,0 +1,66 @@
+# Pulls every card image (JPG) from MythicSpoiler's Star Trek set listing,
+# https://mythicspoiler.com/trk/cards/, into cards/ and commits whatever is new or changed.
+# Runs once a day while the set is being spoiled, and by hand from Actions → Card images →
+# Run workflow (the index URL and folder can be overridden there). Images already in cards/ are
+# only fetched again when the site has a newer copy; nothing is ever deleted here.
+#
+# The commit it pushes has no *b / *u marker, so it doesn't start a TestFlight build, and a
+# push made with the workflow token doesn't trigger other workflows anyway.
+name: Card images
+
+on:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Directory index to pull the JPGs from"
+        required: false
+        default: "https://mythicspoiler.com/trk/cards/"
+      dest:
+        description: "Folder in the repo to put them in"
+        required: false
+        default: "cards"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: card-images
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      URL: ${{ inputs.url || 'https://mythicspoiler.com/trk/cards/' }}
+      DEST: ${{ inputs.dest || 'cards' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the images
+        id: fetch
+        run: .github/scripts/fetch-card-images.sh "$DEST" "$URL"
+
+      - name: Commit anything new or changed
+        env:
+          ADDED: ${{ steps.fetch.outputs.added }}
+          UPDATED: ${{ steps.fetch.outputs.updated }}
+          TOTAL: ${{ steps.fetch.outputs.total }}
+        run: |
+          git add -- "$DEST"
+          if git diff --cached --quiet; then
+            echo "No new or changed images ($TOTAL in $DEST)."
+            echo "### Card images: no changes ($TOTAL in $DEST)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Card images: $ADDED added, $UPDATED updated ($TOTAL total)"
+          # Someone may have pushed meanwhile; replay on top of their commit and try again.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            git fetch origin "$GITHUB_REF_NAME" && git rebase "origin/$GITHUB_REF_NAME"
+          done
+          echo "### Card images: $ADDED added, $UPDATED updated ($TOTAL in $DEST)" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,220 @@
+# Builds the release APK and publishes it as a GitHub Release, which the installed app then
+# offers as an in-app update (lib/app/updater.dart).
+#
+#   "build" anywhere in a commit subject   -> release "build-<n>" with the APK (any branch; the
+#   (whole word, any case) or *u              same markers send the iOS build to TestFlight)
+#   push a tag like v1.2.0                 -> release "v1.2.0" with the APK
+#   Run workflow                           -> release "build-<n>"
+#
+# Every release carries MagicTrek.apk and update.json (version name, version code = this
+# workflow's run number, APK link). The stable links
+#   https://github.com/<owner>/<repo>/releases/latest/download/MagicTrek.apk
+#   https://github.com/<owner>/<repo>/releases/latest/download/update.json
+# always point at the newest release; the app reads update.json on launch.
+#
+# Signing: with the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
+# ANDROID_KEY_PASSWORD secrets (or the same without the ANDROID_ prefix) the APK is signed with that key, and in-app updates install over
+# the previous build. With none of those but a SECRETS_TOKEN secret (a GitHub token that may
+# write this repository's Actions secrets) the workflow creates the key itself, stores it as
+# those four secrets, signs this build with it and attaches an encrypted backup to the run.
+# With neither it signs with the runner's throwaway debug key: that installs when sideloaded,
+# but every build has a different signature, so an update means uninstalling first; the run
+# carries a warning so this is never silent.
+name: Android release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      tag: ${{ steps.plan.outputs.tag }}
+      subject: ${{ steps.plan.outputs.subject }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          go=false; tag=""
+          subject=$(git log -1 --format=%s)
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then go=true; tag="$GITHUB_REF_NAME"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then go=true; tag="build-$GITHUB_RUN_NUMBER"
+          else
+            case "$subject" in *'*u'*) go=true ;; esac
+            if printf '%s' "$subject" | grep -qiE '(^|[^[:alnum:]])build([^[:alnum:]]|$)'; then go=true; fi
+            if [ "$go" = true ]; then
+              # A tagged commit is released by the tag's run, not the branch's.
+              git fetch --quiet --tags origin
+              if git tag --points-at HEAD | grep -qE '^v[0-9]+(\.[0-9]+){1,2}$'; then
+                echo "Tagged commit; the tag's run handles it."; go=false
+              else
+                tag="build-$GITHUB_RUN_NUMBER"
+              fi
+            fi
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+          echo "go=$go tag=$tag subject=$subject"
+
+  apk:
+    needs: plan
+    if: needs.plan.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: android-release
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      # The NDK (path_provider's jni dependency compiles C with it) is ~700 MB that Gradle
+      # would download on every fresh runner, and that download arrives corrupt now and then.
+      # Keep it in the Actions cache; on a miss install it with retries.
+      - name: Android NDK
+        id: ndk
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/28.2.13676358
+          key: android-ndk-28.2.13676358
+      - name: Install the NDK
+        if: steps.ndk.outputs.cache-hit != 'true'
+        run: |
+          sdk="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$sdk/ndk/28.2.13676358"
+            if yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" > "$RUNNER_TEMP/ndk.log" 2>&1 \
+               && [ -f "$sdk/ndk/28.2.13676358/source.properties" ]; then
+              echo "NDK installed on attempt $attempt"; exit 0
+            fi
+            echo "::warning::NDK install failed on attempt $attempt"; tail -3 "$RUNNER_TEMP/ndk.log"; sleep 10
+          done
+          exit 1
+      # The signing key, in order of preference: the ANDROID_KEYSTORE_* secrets; a key this run
+      # creates and stores as those secrets itself, when a token that may write repository
+      # secrets is available (SECRETS_TOKEN: a classic PAT with "repo", or a fine-grained one with
+      # Secrets: read and write on this repository); else the runner's throwaway debug key.
+      - name: Release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}
+          TOKEN_1: ${{ secrets.SECRETS_TOKEN }}
+          TOKEN_2: ${{ secrets.GH_PAT }}
+          TOKEN_3: ${{ secrets.REPO_TOKEN }}
+          TOKEN_4: ${{ secrets.ADMIN_TOKEN }}
+          TOKEN_5: ${{ secrets.PAT }}
+        run: |
+          store="$RUNNER_TEMP/release.keystore"
+          use() {
+            # use <store password> <alias> <key password>: hand the key to the Build step (and
+            # Gradle) through the job environment.
+            echo "::add-mask::$1"; echo "::add-mask::$3"
+            { echo "ANDROID_KEYSTORE_PATH=$store"; echo "ANDROID_KEYSTORE_PASSWORD=$1"
+              echo "ANDROID_KEY_ALIAS=$2"; echo "ANDROID_KEY_PASSWORD=$3"; echo "SIGNED=release"; } >> "$GITHUB_ENV"
+          }
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$store"
+            use "$KEYSTORE_PASSWORD" "${KEY_ALIAS:-magictrek}" "${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+            echo "Signing with the release keystore from the repository secrets"
+            exit 0
+          fi
+          token=""
+          for t in "$TOKEN_1" "$TOKEN_2" "$TOKEN_3" "$TOKEN_4" "$TOKEN_5"; do if [ -n "$t" ]; then token="$t"; break; fi; done
+          if [ -n "$token" ]; then
+            echo "No signing key yet; creating one and storing it as the ANDROID_KEYSTORE_* secrets"
+            password=$(openssl rand -hex 24)
+            keytool -genkeypair -keystore "$store" -storetype PKCS12 -alias magictrek -keyalg RSA -keysize 2048 \
+              -validity 36500 -storepass "$password" -keypass "$password" -dname "CN=MagicTrek, O=Lightwave" > /dev/null 2>&1
+            encoded=$(base64 -w0 "$store")
+            echo "::add-mask::$encoded"
+            export GH_TOKEN="$token"
+            gh secret set ANDROID_KEYSTORE_BASE64 --repo "$GITHUB_REPOSITORY" --body "$encoded"
+            gh secret set ANDROID_KEYSTORE_PASSWORD --repo "$GITHUB_REPOSITORY" --body "$password"
+            gh secret set ANDROID_KEY_ALIAS --repo "$GITHUB_REPOSITORY" --body magictrek
+            gh secret set ANDROID_KEY_PASSWORD --repo "$GITHUB_REPOSITORY" --body "$password"
+            use "$password" magictrek "$password"
+            # A backup the owner can decrypt with that same token (secrets can't be read back):
+            #   openssl enc -d -aes-256-cbc -pbkdf2 -in magictrek.keystore.enc -out magictrek.jks -pass pass:<token>
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in "$store" -out "$RUNNER_TEMP/magictrek.keystore.enc" -pass env:GH_TOKEN
+            echo "BACKUP=$RUNNER_TEMP/magictrek.keystore.enc" >> "$GITHUB_ENV"
+            echo "### Android signing key created and stored as the ANDROID_KEYSTORE_* repository secrets. Every build from now on is signed with it, so installed copies update in place. An encrypted backup is attached to this run as an artifact; decrypt it with the SECRETS_TOKEN value (see the workflow)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "SIGNED=debug" >> "$GITHUB_ENV"
+          echo "::warning::No signing key and no SECRETS_TOKEN secret to create one with: the APK is signed with a throwaway debug key, so the in-app updater cannot install the next build over this one. Add the ANDROID_KEYSTORE_* secrets, or a SECRETS_TOKEN secret and the workflow makes the key itself (README, Releases)."
+      - name: Keep an encrypted backup of the new key
+        if: env.BACKUP != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-signing-key-encrypted
+          path: ${{ env.BACKUP }}
+          retention-days: 90
+      - run: flutter pub get
+      - name: Build
+        run: |
+          name=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)
+          case "$TAG" in v*) name="${TAG#v}" ;; esac
+          # The NDK the SDK fetches on first use sometimes arrives corrupt ("Error reading Zip
+          # content from a SeekableByteChannel"); drop the half-installed copy and go again.
+          set -o pipefail
+          ok=false
+          for attempt in 1 2 3; do
+            if flutter build apk --release --build-name "$name" --build-number "$GITHUB_RUN_NUMBER" 2>&1 | tee "$RUNNER_TEMP/apk.log"; then ok=true; break; fi
+            grep -q "Error reading Zip content\|preparing SDK package NDK" "$RUNNER_TEMP/apk.log" || break
+            echo "::warning::The NDK download was corrupt; retrying (attempt $attempt failed)"
+            rm -rf "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/ndk/28*
+          done
+          [ "$ok" = true ]
+          cp build/app/outputs/flutter-apk/app-release.apk MagicTrek.apk
+          echo "VERSION_NAME=$name" >> "$GITHUB_ENV"
+      - name: Describe the release
+        env:
+          SUBJECT: ${{ needs.plan.outputs.subject }}
+        run: |
+          apk="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/MagicTrek.apk"
+          python3 - "$VERSION_NAME" "$GITHUB_RUN_NUMBER" "$TAG" "$apk" "$SUBJECT" "$SIGNED" <<'PY'
+          import json, sys
+          name, code, tag, apk, subject, signed = sys.argv[1:7]
+          json.dump({"versionName": name, "versionCode": int(code), "tag": tag, "apk": apk,
+                     "notes": subject, "signing": signed}, open("update.json", "w"), indent=2)
+          PY
+          cat update.json
+          {
+            echo "MagicTrek $VERSION_NAME (build $GITHUB_RUN_NUMBER) for Android, from \`${GITHUB_SHA::7}\`: $SUBJECT"
+            echo
+            echo "- **Install**: download \`MagicTrek.apk\` below on the phone and open it (allow installs from your browser when asked)."
+            echo "- **Always the newest build**: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/MagicTrek.apk"
+            echo "- Installed copies offer this build as an update on launch."
+            if [ "$SIGNED" = debug ]; then
+              echo "- Signed with a throwaway debug key (no \`ANDROID_KEYSTORE_*\` secrets): uninstall the previous build before installing this one."
+            fi
+          } > notes.md
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: MagicTrek ${{ env.VERSION_NAME }} (build ${{ github.run_number }})
+          body_path: notes.md
+          files: |
+            MagicTrek.apk
+            update.json
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore"
