@@ -67,6 +67,21 @@ void main() {
     final session = store.startLocalGame(deck: decks[0], opponentDeck: decks[1], hotseat: false);
     await tester.pumpWidget(app(const GameScreen()));
     await tester.pump();
+    // First game: the tour of the table shows. Walk through it.
+    expect(find.text('WELCOME ABOARD'), findsOneWidget);
+    for (var i = 0; i < 10 && find.text('GOT IT').evaluate().isEmpty; i++) {
+      await tester.tap(find.text('NEXT'));
+      await tester.pump();
+    }
+    await tester.tap(find.text('GOT IT'));
+    await tester.pump();
+    expect(store.tourSeen, isTrue);
+    // Tapping a card in hand shows it large, with a way out.
+    await tester.tap(find.byKey(ValueKey('hand-${session.state.players[0].hand.first}')));
+    await tester.pumpAndSettle();
+    expect(find.text('RULES & DETAILS'), findsOneWidget);
+    await tester.tap(find.text('CLOSE'));
+    await tester.pumpAndSettle();
     // Answer the mulligan prompts (ours and, via the bot timer, the computer's).
     for (var i = 0; i < 40 && session.state.turn < 3; i++) {
       await tester.pump(const Duration(milliseconds: 700));

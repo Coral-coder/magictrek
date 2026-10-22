@@ -27,6 +27,12 @@ class AppStore extends ChangeNotifier {
   GameSession? session;
   String playerName = 'Captain';
   bool soundOn = true, hapticsOn = true, autoUpdate = true;
+  /// Tapping a card on the table opens it large with its actions, instead of acting at once.
+  bool tapToInspect = true;
+  /// A line on the table saying what you can do right now, for new players.
+  bool coachOn = true;
+  /// Whether the guided tour of the table has been shown (or skipped).
+  bool tourSeen = false;
   Rules rules = Rules.standard;
   String deviceId = '';
   String relayIdentity = '';
@@ -42,6 +48,9 @@ class AppStore extends ChangeNotifier {
     soundOn = _prefs.getBool('soundOn') ?? true;
     hapticsOn = _prefs.getBool('hapticsOn') ?? true;
     autoUpdate = _prefs.getBool('autoUpdate') ?? true;
+    tapToInspect = _prefs.getBool('tapToInspect') ?? true;
+    coachOn = _prefs.getBool('coachOn') ?? true;
+    tourSeen = _prefs.getBool('tourSeen') ?? false;
     final rulesJson = _prefs.getString('rules');
     if (rulesJson != null) {
       try {
@@ -115,6 +124,24 @@ class AppStore extends ChangeNotifier {
     autoUpdate = v;
     Updater.shared.autoDownload = v;
     await _prefs.setBool('autoUpdate', v);
+    notifyListeners();
+  }
+
+  Future<void> setTapToInspect(bool v) async {
+    tapToInspect = v;
+    await _prefs.setBool('tapToInspect', v);
+    notifyListeners();
+  }
+
+  Future<void> setCoach(bool v) async {
+    coachOn = v;
+    await _prefs.setBool('coachOn', v);
+    notifyListeners();
+  }
+
+  Future<void> setTourSeen(bool v) async {
+    tourSeen = v;
+    await _prefs.setBool('tourSeen', v);
     notifyListeners();
   }
 
