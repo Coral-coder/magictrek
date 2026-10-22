@@ -24,3 +24,8 @@ ios/Flutter/flutter_export_environment.sh
 # Tools
 .scryfall-cache/
 .DS_Store
+# Swift version (swift/)
+swift/*.xcodeproj
+swift/**/.build/
+swift/**/.swiftpm/
+DerivedData/

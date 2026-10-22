@@ -17,6 +17,7 @@ friend nearby over Wi‑Fi or Bluetooth, or play anyone anywhere through public 
 | `lib/ui/` | LCARS widgets and screens. |
 | `test/` | Engine, networking and widget tests (`flutter test`). |
 | `tool/cardtool.dart` | `dart run tool/cardtool.dart` reports parser coverage; `dart run tool/cardtool.dart "Picard"` shows one card. |
+| `swift/` | The earlier native SwiftUI version (iOS only, CloudKit multiplayer): `xcodegen generate` in `swift/` makes the Xcode project, and its rules package tests with `swift test` in `swift/Packages/MagicTrekCore`. Not shipped; the Swift build workflow compiles it when `swift/` changes. |
 
 ## Building
 
