@@ -89,8 +89,8 @@ jobs:
           fi
           dir="$IOS_DIR"
           if [ -z "$dir" ]; then
-            found=$(find . -maxdepth 3 -name '*.xcodeproj' -not -path '*/Pods/*' | sort | head -1)
-            [ -z "$found" ] && found=$(find . -maxdepth 3 -name project.yml -not -path '*/Pods/*' | sort | head -1)
+            found=$(find . -maxdepth 3 -name '*.xcodeproj' -not -path '*/Pods/*' -not -path './swift/*' | sort | head -1)
+            [ -z "$found" ] && found=$(find . -maxdepth 3 -name project.yml -not -path '*/Pods/*' -not -path './swift/*' | sort | head -1)
             [ -n "$found" ] && dir=$(dirname "$found")
           fi
           if [ "$build" = true ] && [ -z "$dir" ]; then
