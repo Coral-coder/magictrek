@@ -125,8 +125,16 @@ extension GameEffects on Game {
       final happened = _applyEffect(e, source, controller, ctx, queue);
       final after = state.pending;
       if (after != null) {
-        after.resume.effects = List.of(queue);
-        after.resume.context = ctx;
+        if (identical(after.resume.context, ctx)) {
+          // This effect asked the question. Effects that ask store what follows themselves and
+          // empty the queue; only a queue left alone still needs saving. (Overwriting with the
+          // emptied queue used to lose every effect after a player's choice.)
+          if (queue.isNotEmpty) after.resume.effects = List.of(queue);
+        } else if (queue.isNotEmpty) {
+          // A trigger this effect set off is the one waiting on a choice: finish this
+          // resolution after it, without mixing the two.
+          state.queuedTriggers.insert(0, QueuedTrigger(source: source, controller: controller, effects: List.of(queue), context: ctx));
+        }
         return;
       }
       ctx.previousHappened = happened;
@@ -317,9 +325,17 @@ extension GameEffects on Game {
         if (ids == null) return false;
         final n = amount(x.amount, controller, source, ctx);
         var given = 0;
-        for (final id in ids) {
-          if (n > 0 && state.objects[id]?.zone == Zone.battlefield) given++;
-          addCounters(x.kind, n, id);
+        final live = ids.where((id) => state.objects[id]?.zone == Zone.battlefield).toList();
+        for (var i = 0; i < ids.length; i++) {
+          final id = ids[i];
+          // Distributed: split as evenly as possible, earlier targets taking the remainder.
+          var each = n;
+          if (x.distribute && live.isNotEmpty) {
+            final at = live.indexOf(id);
+            each = at < 0 ? 0 : n ~/ live.length + (at < n % live.length ? 1 : 0);
+          }
+          if (each > 0 && state.objects[id]?.zone == Zone.battlefield) given++;
+          addCounters(x.kind, each, id);
         }
         ctx.counted = given;
         return ids.isNotEmpty;
@@ -744,7 +760,8 @@ extension GameEffects on Game {
           move(id, Zone.library, toBottom: true);
         }
         if (found == null) return false;
-        playFree(found, controller);
+        // Cast it free, or put it into your hand.
+        remaining.insert(0, OfferFreeCast(found, toHandIfDeclined: true));
         return true;
       case PayLife x:
         if (state.players[controller].life > x.n) {
@@ -860,10 +877,34 @@ extension GameEffects on Game {
           if (c.isLand) {
             putCard(top, LibraryDestination.battlefieldTapped, controller);
           } else if (c.manaValue <= amount(x.max, controller, source, ctx)) {
-            castFree(top, controller);
+            // The player may cast it; the draw waits for that answer.
+            remaining.insertAll(0, [OfferFreeCast(top), DrawIfStillOnTop(top)]);
+            return true;
           }
         }
         if (state.players[controller].library.firstOrNull == top) _draw(controller, 1);
+        return true;
+      case OfferFreeCast x:
+        final o = state.objects[x.card];
+        if (o == null || o.zone == Zone.battlefield || o.zone == Zone.stack || o.zone == Zone.graveyard) return false;
+        if (state.players[controller].isBot) {
+          final choice = Bot.freeCastChoice(this, x.card, controller);
+          if (choice != null) {
+            castFree(x.card, controller, mode: choice.$1, targets: choice.$2);
+          } else if (x.toHandIfDeclined) {
+            move(x.card, Zone.hand);
+          }
+          return true;
+        }
+        state.pending = PendingDecision(
+          player: controller,
+          decision: FreeCastDecision(x.card, toHandIfDeclined: x.toHandIfDeclined),
+          resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.freeCast),
+        );
+        remaining.clear();
+        return true;
+      case DrawIfStillOnTop x:
+        if (state.players[controller].library.firstOrNull == x.card) _draw(controller, 1);
         return true;
       case SearchCard x:
         final pool = <ObjectID>[...state.players[controller].library, if (x.alsoGraveyard) ...state.players[controller].graveyard];
@@ -1127,10 +1168,11 @@ extension GameEffects on Game {
           move(top, Zone.exile);
           exiled.add(top);
         }
-        for (final id in exiled) {
-          final c = card(id);
-          if (c != null && !c.isLand && c.manaValue <= max) castFree(id, controller);
-        }
+        // "Any number of" them: each is offered in turn.
+        remaining.insertAll(0, [
+          for (final id in exiled)
+            if (card(id) case final c? when !c.isLand && c.manaValue <= max) OfferFreeCast(id),
+        ]);
         return exiled.isNotEmpty;
       case ExtraCountersThisTurn _:
         state.players[controller].extraCounterThisTurn = true;
@@ -1344,46 +1386,42 @@ extension GameEffects on Game {
 
   /// Casts a card without paying its mana cost, right away (targets chosen as the computer
   /// would for that player when they aren't asked).
-  void castFree(ObjectID id, PlayerID p) {
+  /// Casts a card without paying its mana cost: it goes on the stack like any spell, so the
+  /// opponent may respond. The bot picks the mode and targets when none are given.
+  void castFree(ObjectID id, PlayerID p, {int? mode, List<ObjectID>? targets}) {
+    final o = state.objects[id];
     final c = card(id);
-    if (c == null) return;
+    if (o == null || c == null) return;
+    final parsed = db.parsed(c);
+    final fromExile = o.zone == Zone.exile;
+    final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
+    if (modal != null) mode ??= Bot.chooseMode(this, modal.modes, p, id);
+    final chosen = targets ??
+        [
+          for (final r in targetRequirementsForCard(c, mode)) ...Bot.chooseTargets(this, r.filter, r.count, true, legalTargets(r.filter, p, id), p, null),
+        ];
+    // An Aura needs something to enchant, or it can't be cast.
+    if (parsed.isAura && chosen.isEmpty) return;
     final ps = state.players[p];
     ps.spellsCastThisTurn++;
     ps.spellsCastThisGame++;
     if (!c.isCreature) ps.noncreatureSpellsThisTurn++;
-    log(GameEvent('cast', player: p, object: id, amount: 0));
-    final fromExile = state.objects[id]?.zone == Zone.exile;
-    _castTriggers(c, id, p, 0);
-    if (c.isPermanent) {
-      move(id, Zone.battlefield, controller: p);
-      if (db.parsed(c).isAura) {
-        final host = legalTargets(Filter.creature, p, id).firstOrNull;
-        if (host == null) {
-          move(id, Zone.graveyard);
-          return;
-        }
-        state.objects[id]!.attachedTo = host;
+    move(id, Zone.stack, controller: p);
+    var effects = <Effect>[];
+    if (!c.isPermanent) {
+      effects = List.of(parsed.spellEffects);
+      final mi = effects.indexWhere((e) => e is Modal);
+      if (mode != null && mi >= 0) {
+        final modes = (effects[mi] as Modal).modes;
+        if (mode < modes.length) effects = [...effects.sublist(0, mi), ...modes[mode], ...effects.sublist(mi + 1)];
       }
-      enteredBattlefield(id, untapped: true, castBy: p);
-    } else {
-      final parsed = db.parsed(c);
-      final ctx = EffectContext();
-      var effects = parsed.spellEffects;
-      final modal = effects.whereType<Modal>().firstOrNull;
-      int? mode;
-      if (modal != null) {
-        mode = Bot.chooseMode(this, modal.modes, p, id);
-        final mi = effects.indexOf(modal);
-        effects = [...effects.sublist(0, mi), ...modal.modes[mode], ...effects.sublist(mi + 1)];
-      }
-      for (final r in targetRequirementsForCard(c, mode)) {
-        final legal = legalTargets(r.filter, p, id);
-        ctx.targets.addAll(Bot.chooseTargets(this, r.filter, r.count, true, legal, p, null));
-      }
-      move(id, Zone.stack, controller: p);
-      resolve(effects, source: id, controller: p, context: ctx);
-      if (state.objects[id]?.zone == Zone.stack) move(id, Zone.graveyard);
     }
+    state.stack.add(StackItem(id: id, controller: p, effects: effects, context: EffectContext()..targets = List.of(chosen)));
+    log(GameEvent('cast', player: p, object: id, amount: 0));
+    for (final (i, a) in parsed.abilities.indexed) {
+      if (a is Triggered && a.event == SimpleTrigger.castThis) fireTrigger(a, '$id:$i', source: id, touched: id, leftBattlefield: true);
+    }
+    _castTriggers(c, id, p, 0);
     if (fromExile) {
       for (final other in state.permanentsOf(p)) {
         fireTriggers(SimpleTrigger.playFromExile, other.id, touched: id);
@@ -1549,6 +1587,10 @@ extension GameEffects on Game {
         return 'exile the top ${x.n}, put permanents onto the battlefield';
       case RevealTopCastFree _:
         return 'reveal the top card and cast it free';
+      case OfferFreeCast x:
+        return 'you may cast ${name(x.card)} for free';
+      case DrawIfStillOnTop _:
+        return 'draw if it is still on top';
       case SearchCard _:
         return 'search for a card';
       case HandChoice x:

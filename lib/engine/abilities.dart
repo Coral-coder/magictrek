@@ -150,6 +150,7 @@ enum FilterKind {
   creatureOrSpacecraft,
   artifactCreature,
   token,
+  creatureToken,
   creatureCardInGraveyard,
   basicLandCardInLibrary,
   artifactOrCreature,
@@ -318,7 +319,8 @@ class TokenSpec with Props {
   final List<ManaColor> colors;
   final List<String> subtypes;
   final List<Keyword> keywords;
-  final bool isArtifact, isCreature, isLand, isLegendary;
+  final bool isArtifact, isCreature, isLand;
+  bool isLegendary;
 
   /// The token's own rules text ("{T}, Sacrifice ~: Add one mana of any color."), parsed like a
   /// card's.
@@ -510,12 +512,16 @@ class Pump extends Effect {
 }
 
 class AddCounters extends Effect {
-  const AddCounters(this.kind, this.amount, this.target);
+  const AddCounters(this.kind, this.amount, this.target, {this.distribute = false});
   final CounterKind kind;
   final Amount amount;
   final Target target;
+
+  /// "Distribute two +1/+1 counters among one or two target creatures": the amount is split
+  /// between the targets (each gets at least one) instead of going on each of them.
+  final bool distribute;
   @override
-  List<Object?> get props => [kind, amount, target];
+  List<Object?> get props => [kind, amount, target, distribute];
 }
 
 class CreateTokens extends Effect {
@@ -862,6 +868,23 @@ class ExileTopPutPermanents extends Effect {
 
 /// Commander Spock: reveal the top card; cast it free if its mana value is at most `max`, or put
 /// a land onto the battlefield tapped; if it's still on top, draw a card.
+/// Offers its controller a free cast of one card (put there by Spock, Sisko or Discover).
+class OfferFreeCast extends Effect {
+  const OfferFreeCast(this.card, {this.toHandIfDeclined = false});
+  final int card;
+  final bool toHandIfDeclined;
+  @override
+  List<Object?> get props => [card, toHandIfDeclined];
+}
+
+/// Commander Spock: "If that card is still on top of your library, draw a card."
+class DrawIfStillOnTop extends Effect {
+  const DrawIfStillOnTop(this.card);
+  final int card;
+  @override
+  List<Object?> get props => [card];
+}
+
 class RevealTopCastFree extends Effect {
   const RevealTopCastFree(this.max);
   final Amount max;
@@ -1273,6 +1296,10 @@ enum SimpleStaticKind {
   hexproofWhileNotCreature,
   cantBeCountered,
   enchantCreature,
+  enchantArtifactOrCreature,
+
+  /// Marooned: the enchanted permanent can't be returned to pay for Beam me up.
+  attachedCantBeBeamedUp,
   enchantCreatureOpponentControls,
   attachedCantAttackOrBlock,
 
@@ -1323,6 +1350,7 @@ class SimpleStatic extends StaticAbility {
   static const hexproofWhileNotCreature = SimpleStatic(SimpleStaticKind.hexproofWhileNotCreature);
   static const cantBeCountered = SimpleStatic(SimpleStaticKind.cantBeCountered);
   static const enchantCreature = SimpleStatic(SimpleStaticKind.enchantCreature);
+  static const enchantArtifactOrCreature = SimpleStatic(SimpleStaticKind.enchantArtifactOrCreature);
   static const enchantCreatureOpponentControls = SimpleStatic(SimpleStaticKind.enchantCreatureOpponentControls);
   static const attachedCantAttackOrBlock = SimpleStatic(SimpleStaticKind.attachedCantAttackOrBlock);
   static SimpleStatic of(SimpleStaticKind kind) => SimpleStatic(kind);
@@ -1445,13 +1473,17 @@ class KeywordAbility extends Ability {
 }
 
 class ManaAbility extends Ability {
-  const ManaAbility(this.colors, {this.artifactSpellsOnly = false}); // {T}: Add one of these (empty = colorless)
+  const ManaAbility(this.colors, {this.artifactSpellsOnly = false, this.amount = 1}); // {T}: Add one of these (empty = colorless)
   final List<ManaColor> colors;
 
   /// "Spend this mana only to cast an artifact spell."
   final bool artifactSpellsOnly;
+
+  /// How much mana one tap makes, all of one of [colors] ({G}{G}{G}: 3 of green; "three mana of
+  /// any one color": 3 of any). Zero for an ability that can't make mana in this game.
+  final int amount;
   @override
-  List<Object?> get props => [colors, artifactSpellsOnly];
+  List<Object?> get props => [colors, artifactSpellsOnly, amount];
   @override
   String toString() => 'mana(${colors.map((c) => c.symbol).join()})';
 }
@@ -1482,10 +1514,13 @@ class Triggered extends Ability {
 }
 
 class Activated extends Ability {
-  const Activated(this.cost, this.effects, {this.sorcerySpeed = false});
+  const Activated(this.cost, this.effects, {this.sorcerySpeed = false, this.text = ''});
   final ActivationCost cost;
   final List<Effect> effects;
   final bool sorcerySpeed;
+
+  /// The ability as printed ("~" stands for the card's name), for buttons. Not part of equality.
+  final String text;
   @override
   List<Object?> get props => [cost, effects, sorcerySpeed];
   @override
@@ -1628,7 +1663,7 @@ class ParsedCard {
   ManaCost? get equipCost => abilities.whereType<Equip>().map((e) => e.cost).firstOrNull;
   Cycling? get cycling => abilities.whereType<Cycling>().firstOrNull;
   ManaCost? get beamMeUp => abilities.whereType<BeamMeUp>().map((b) => b.cost).firstOrNull;
-  bool get isAura => statics.contains(SimpleStatic.enchantCreature) || statics.contains(SimpleStatic.enchantCreatureOpponentControls);
+  bool get isAura => statics.contains(SimpleStatic.enchantCreature) || statics.contains(SimpleStatic.enchantArtifactOrCreature) || statics.contains(SimpleStatic.enchantCreatureOpponentControls);
   List<List<Effect>> triggers(TriggerEvent event) => abilities.whereType<Triggered>().where((t) => t.event == event).map((t) => t.effects).toList();
   int? get stationThreshold => abilities.whereType<StationAbilities>().map((s) => s.threshold).fold<int?>(null, (a, b) => a == null || b > a ? b : a);
 

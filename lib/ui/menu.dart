@@ -9,6 +9,18 @@ import 'update.dart';
 class MainMenuScreen extends StatelessWidget {
   const MainMenuScreen({super.key});
 
+  /// A practice game against the computer with the tour of the table and coach hints on:
+  /// Starfleet Command against the Klingon Empire.
+  static Future<void> startTutorial(BuildContext context) async {
+    final store = AppStore.shared;
+    await store.setTourSeen(false);
+    await store.setCoach(true);
+    final decks = store.starterDecks;
+    if (decks.length < 2 || !context.mounted) return;
+    store.startLocalGame(deck: decks[0], opponentDeck: decks[1], hotseat: false);
+    await Navigator.pushNamed(context, '/game');
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStore.shared;
@@ -28,6 +40,8 @@ class MainMenuScreen extends StatelessWidget {
               }),
               const SizedBox(height: 6),
             ],
+            LcarsButton('Tutorial: learn to play', icon: Icons.school, color: LCARS.green, onPressed: () => startTutorial(context)),
+            const SizedBox(height: 6),
             LcarsButton('Play vs Computer', icon: Icons.memory, onPressed: () => Navigator.pushNamed(context, '/new', arguments: false)),
             const SizedBox(height: 6),
             LcarsButton('Pass & Play', icon: Icons.people, color: LCARS.butterscotch, onPressed: () => Navigator.pushNamed(context, '/new', arguments: true)),
@@ -62,11 +76,12 @@ class HowToPlayScreen extends StatelessWidget {
     ('Combat', 'Tap Attack, pick attackers, confirm. The defender assigns blockers: tap a blocker, then the attacker it blocks. Unblocked attackers hit the player. Flying creatures can only be blocked by flying or reach.'),
     ('Spacecraft', 'Starships enter as artifacts. Station them: tap one of your creatures to add charge counters equal to its power. At the threshold (for example 5+) the ship becomes an artifact creature with the listed abilities.'),
     ('Keywords', 'Flying, first strike, double strike, deathtouch, lifelink, trample, haste, vigilance, menace, reach, defender, ward, hexproof and indestructible all work as printed.'),
-    ('Decisions', 'When a card asks you something (a target, a mode, surveil, discard) the prompt appears in the middle bar. Tap the highlighted cards.'),
+    ('Decisions', 'When a card asks you something (a target, a mode, surveil, discard) the question appears in the middle bar with its answers as buttons. When you must pick cards, the ones you can pick glow gold.'),
     ('Sagas, Borg, Landfall', 'Sagas gain a lore counter each turn and tell their story. Borg cards assimilate creature cards from graveyards. Landfall triggers when a land enters under your control.'),
     ('Nearby play', 'Both phones on one Wi‑Fi, or Bluetooth with no network: one hosts, the other joins. Every move is checked on both phones, so the game can never drift apart.'),
     ('Remote play', 'Create a code and send it to a friend anywhere. Moves travel encrypted through public relays; nobody runs a server. Leave and come back later: the match catches up from the relays.'),
-    ('Card coverage', "Every card is playable for its stats. Cards marked 'Fully playable' in the database have all their text implemented; others show what is missing."),
+    ('Reading cards', 'Tap any card on the table or in your hand to see it large, with buttons for what you can do with it. If nothing can be done, it says why (not enough mana, wrong phase…).'),
+    ('Card coverage', 'Every card in the set plays its printed rules text.'),
   ];
 
   @override
@@ -125,6 +140,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const LcarsHeader('Console', color: LCARS.lavender),
           SwitchListTile(title: Text('Console sounds', style: LCARS.body), value: store.soundOn, activeThumbColor: LCARS.orange, onChanged: store.setSound, contentPadding: EdgeInsets.zero),
           SwitchListTile(title: Text('Haptics', style: LCARS.body), value: store.hapticsOn, activeThumbColor: LCARS.orange, onChanged: store.setHaptics, contentPadding: EdgeInsets.zero),
+          const LcarsHeader('Table', color: LCARS.skyBlue),
+          SwitchListTile(
+            title: Text('Tap a card to see it first', style: LCARS.body),
+            subtitle: Text('Tapping a card shows it large with what you can do. Off: tapping plays it straight away.', style: LCARS.label),
+            value: store.tapToInspect,
+            activeThumbColor: LCARS.orange,
+            onChanged: store.setTapToInspect,
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            title: Text('Coach hints', style: LCARS.body),
+            subtitle: Text('A line on the table saying what you can do right now.', style: LCARS.label),
+            value: store.coachOn,
+            activeThumbColor: LCARS.orange,
+            onChanged: store.setCoach,
+            contentPadding: EdgeInsets.zero,
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: () => store.setTourSeen(false), child: Text('Show the table tour again in the next game', style: LCARS.label.copyWith(color: LCARS.skyBlue))),
+          ),
           const LcarsHeader('Rules', color: LCARS.butterscotch),
           Text('How new games are played. The host\'s rules apply to a linked match; a saved game keeps the rules it started with.', style: LCARS.label),
           const SizedBox(height: 6),

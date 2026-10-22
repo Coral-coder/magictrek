@@ -157,9 +157,23 @@ class _Parser {
     }
     final mana = rx(body, r'\{T\}: Add (.+?)\.?');
     if (mana != null) {
+      final text = mana[1].toLowerCase();
+      // Commanders don't exist here, so "X mana, where X is … among commanders" is always 0.
+      if (text.contains('commanders you control')) {
+        abilities.add(const ManaAbility([], amount: 0));
+        return;
+      }
+      final many = rx(text, r'(two|three|four|five) mana of any one color');
+      if (many != null) {
+        abilities.add(ManaAbility(List.of(ManaColor.values), amount: numberWord(many[1]) ?? 1));
+        return;
+      }
       final colors = manaColors(mana[1]);
       if (colors != null) {
-        abilities.add(ManaAbility(colors));
+        // {G}{G}{G} and {C}{C}: several of one color from one tap.
+        final symbols = RegExp(r'\{[a-z]\}').allMatches(text).map((m) => m[0]).toList();
+        final repeated = !text.contains(' or ') && symbols.length > 1 && symbols.toSet().length == 1;
+        abilities.add(repeated ? ManaAbility(colors.isEmpty ? const [] : [colors.first], amount: symbols.length) : ManaAbility(colors));
         return;
       }
     }
@@ -206,7 +220,7 @@ class _Parser {
         }
         final (fx, bad) = effects(effectText);
         if (bad.isEmpty && fx.isNotEmpty) {
-          abilities.add(Activated(cost, fx, sorcerySpeed: sorcery));
+          abilities.add(Activated(cost, fx, sorcerySpeed: sorcery, text: body.trim()));
         } else {
           unsupported.add(line);
         }
@@ -312,7 +326,7 @@ class _Parser {
         continue;
       }
       if (p == 'enchant creature' || p == 'enchant artifact or creature') {
-        out.add(const StaticAbilityEntry(SimpleStatic.enchantCreature));
+        out.add(StaticAbilityEntry(p == 'enchant creature' ? SimpleStatic.enchantCreature : SimpleStatic.enchantArtifactOrCreature));
         continue;
       }
       if (p == 'enchant creature an opponent controls') {
@@ -1149,7 +1163,7 @@ class _Parser {
       if (a != null && b != null) return [...a, ...b];
     }
     if ((m = rx(s, r"if ~ (isn't|is) a creature, (.+)")) != null) {
-      final inner = effect(m![2]);
+      final inner = effect(m![2].replaceAll(RegExp(r'\bon it\b'), 'on ~'));
       if (inner != null) return [Conditional(m[1].toLowerCase() == 'is' ? Condition.thisIsCreature : Condition.thisIsNotCreature, inner)];
     }
     if ((m = rx(l, r"create a token that's a copy of (.+?)(?:, except it has (.+))?")) != null) {
@@ -1201,7 +1215,7 @@ class _Parser {
     }
     if ((m = rx(l, 'distribute $_num \\+1/\\+1 counters among one or two target creatures')) != null) {
       final a = amount(m![1]);
-      if (a != null) return [AddCounters(CounterKind.plusOne, a, ChosenTarget(Filter.creature))];
+      if (a != null) return [AddCounters(CounterKind.plusOne, a, ChosenTarget(Filter.creature, count: 2), distribute: true)];
     }
     if ((m = rx(l, r'~ deals damage equal to its power to (.+)')) != null) {
       final t = target(m![1]);
@@ -1305,11 +1319,13 @@ class _Parser {
       final t = target(m![1]);
       if (t != null) {
         final fx = <Effect>[Pump(int.parse(m[2]), int.parse(m[3]), t, EffectDuration.endOfTurn)];
+        // "Target creature gets +3/+3 and gains trample": one target, chosen once.
+        final again = t is ChosenTarget ? Target.lastTarget : t;
         if (m[4].isNotEmpty) {
           for (final kw in m[4].split(' and ').map((s) => s.trim())) {
             final k = keyword(kw);
             if (k == null) return null;
-            fx.add(GrantKeyword(k, t, EffectDuration.endOfTurn));
+            fx.add(GrantKeyword(k, again, EffectDuration.endOfTurn));
           }
         }
         return fx;
@@ -1322,7 +1338,8 @@ class _Parser {
         for (final kw in m[2].split(' and ').map((s) => s.trim())) {
           final k = keyword(kw);
           if (k == null) return null;
-          fx.add(GrantKeyword(k, t, EffectDuration.endOfTurn));
+          // "gains hexproof and indestructible": the same target for each keyword.
+          fx.add(GrantKeyword(k, fx.isNotEmpty && t is ChosenTarget ? Target.lastTarget : t, EffectDuration.endOfTurn));
         }
         return fx;
       }
@@ -1403,6 +1420,14 @@ class _Parser {
           }
         }
         spec.name = spec.subtypes.join(' ');
+        // "create Porthos, a legendary 1/1 green Dog creature token": a named, legendary token.
+        final named = rx(l, r"(?:.* )?creates? ([\w' ]+), an? (?:legendary )?\d+/\d+.*");
+        if (named != null) {
+          // Keep the name's capitals from the card text.
+          final at = card.oracleText.toLowerCase().indexOf(named[1]);
+          spec.name = at < 0 ? named[1] : card.oracleText.substring(at, at + named[1].length);
+        }
+        if (l.contains(' legendary ')) spec.isLegendary = true;
         return [CreateTokens(spec, a, who)];
       }
     }
@@ -1483,7 +1508,7 @@ class _Parser {
         case 'land':
           f.kind = FilterKind.land;
         case 'creature token':
-          f.kind = FilterKind.token;
+          f.kind = FilterKind.creatureToken;
         case 'artifact or creature':
           f.kind = FilterKind.artifactOrCreature;
       }
@@ -2063,6 +2088,8 @@ class _Parser {
             PutLandsFromHand(Amount.counted(AmountKind.otherCreaturesWithCommunicator)),
           ]),
         ];
+      case "enchanted permanent doesn't untap during its controller's untap step and can't be beamed up":
+        return const [StaticAbilityEntry(SimpleStatic(SimpleStaticKind.attachedDoesntUntap)), StaticAbilityEntry(SimpleStatic(SimpleStaticKind.attachedCantBeBeamedUp))];
       case 'when you cast ~, copy it':
         return const [
           Triggered(SimpleTrigger.castThis, [CopyThisSpell()]),

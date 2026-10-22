@@ -216,11 +216,12 @@ class LcarsButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(height / 2),
         child: Container(
           height: height,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.symmetric(horizontal: height < 40 ? 10 : 16),
           decoration: BoxDecoration(color: fill ? color : color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(height / 2), border: fill ? null : Border.all(color: color, width: 2)),
           child: Row(mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
             if (icon != null) ...[Icon(icon, color: fg, size: 18), const SizedBox(width: 8)],
-            Flexible(child: Text(label.toUpperCase(), style: LCARS.font(14, color: fg), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            // Long labels shrink to fit rather than being cut off.
+            Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(label.toUpperCase(), style: LCARS.font(14, color: fg), maxLines: 1))),
           ]),
         ),
       ),

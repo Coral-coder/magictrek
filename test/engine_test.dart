@@ -464,8 +464,26 @@ void main() {
       final spock = game.newObject(cardID: db.byName('Commander Spock')!.id, owner: 0, zone: Zone.hand);
       game.move(spock, Zone.battlefield, controller: 0);
       game.fireTriggers(SimpleTrigger.enters, spock);
+      // A human player is asked; the card waits on top of the library meanwhile.
+      expect(game.state.pending?.decision, isA<FreeCastDecision>());
+      final hand = game.state.players[0].hand.length;
+      game.apply(const RespondAction(FreeCastResponse(cast: true)));
       passWindows(game);
       expect(game.state.objects[drednok]!.zone, Zone.battlefield, reason: 'mana value 1 <= 2 differently named lands');
+      expect(game.state.players[0].hand.length, hand, reason: 'it left the top, so no draw');
+    });
+
+    test('Commander Spock: declining the free cast draws the card instead', () {
+      final game = makeGame([]);
+      giveLands(game, 0, 'Plains', 1);
+      giveLands(game, 0, 'Island', 1);
+      final drednok = game.newObject(cardID: db.byName('Relentless Drednok')!.id, owner: 0, zone: Zone.library);
+      game.state.players[0].library.insert(0, drednok);
+      final spock = game.newObject(cardID: db.byName('Commander Spock')!.id, owner: 0, zone: Zone.hand);
+      game.move(spock, Zone.battlefield, controller: 0);
+      game.fireTriggers(SimpleTrigger.enters, spock);
+      game.apply(const RespondAction(FreeCastResponse(cast: false)));
+      expect(game.state.objects[drednok]!.zone, Zone.hand, reason: 'still on top, so it is drawn');
     });
 
     test('Peace in Our Time: drawing stops the attack and wins only at twelve counters', () {
@@ -509,6 +527,78 @@ void main() {
       passWindows(game);
       expect(game.state.objects[crew], isNull, reason: 'the token was sacrificed');
       expect(game.state.objects[enemy]!.zone, Zone.graveyard, reason: '5/6 with -6/-6 dies');
+    });
+    test('Gumato taps for three green mana; leftovers stay in the pool', () {
+      final game = makeGame([db.byName('Battle-Scarred Survivalist')!.id]);
+      final gumato = putOnTable(game, 0, 'Gumato');
+      expect(game.canPay(ManaCost.parse('{G}{G}{G}'), 0), isTrue);
+      expect(game.canPay(ManaCost.parse('{G}{G}{G}{G}'), 0), isFalse);
+      // A {1}{B} spell can't be paid by green mana alone.
+      final spell = game.state.players[0].hand.first;
+      expect(game.canCast(spell, 0), isFalse);
+      giveLands(game, 0, 'Swamp', 1);
+      game.apply(CastAction(spell));
+      passWindows(game);
+      expect(game.state.objects[gumato]!.tapped, isTrue);
+      expect(game.state.players[0].manaPool['G'], 2, reason: 'one green paid the generic, two float');
+    });
+
+    test('Shields Up! and Run Amok ask for one target', () {
+      for (final name in ['Shields Up!', 'Run Amok', 'Dathon and Picard at El-Adrel']) {
+        final card = db.byName(name)!;
+        final game = makeGame([]);
+        expect(game.targetRequirementsForCard(card, name.startsWith('Dathon') ? 0 : null).length, 1, reason: name);
+      }
+    });
+
+    test('Pure Energy splits its counters between two creatures', () {
+      final game = makeGame([db.byName('Pure Energy')!.id]);
+      giveLands(game, 0, 'Plains', 2);
+      final a = putOnTable(game, 0, 'Head of Security');
+      final b = putOnTable(game, 0, 'Sickbay Orderly');
+      game.apply(CastAction(game.state.players[0].hand.first, targets: [a, b]));
+      passWindows(game);
+      expect(game.state.objects[a]!.counters[CounterKind.plusOne], 1);
+      expect(game.state.objects[b]!.counters[CounterKind.plusOne], 1);
+    });
+
+    test('Romulan Bird-of-Prey charges itself when a noncreature spell is cast', () {
+      final game = makeGame([db.byName('Gin\'tak Charge')!.id]);
+      giveLands(game, 0, 'Mountain', 1);
+      final ship = putOnTable(game, 0, 'Romulan Bird-of-Prey');
+      game.apply(CastAction(game.state.players[0].hand.first, targets: [EffectContext.playerObject(1)]));
+      passWindows(game);
+      expect(game.state.objects[ship]!.chargeCounters, 2);
+    });
+
+    test('Marooned can enchant an artifact', () {
+      final game = makeGame([db.byName('Marooned')!.id]);
+      giveLands(game, 0, 'Island', 1);
+      final relic = putOnTable(game, 1, 'Replicator');
+      final aura = game.state.players[0].hand.first;
+      expect(game.canCast(aura, 0), isTrue);
+      game.apply(CastAction(aura, targets: [relic]));
+      passWindows(game);
+      if (game.state.pending?.decision is ChooseOptionalDecision) game.apply(const RespondAction(NoResponse()));
+      expect(game.state.objects[aura]!.attachedTo, relic);
+    });
+    test('effects after a player\'s choice still happen (First Contact gains 2 life)', () {
+      final game = makeGame([db.byName('First Contact')!.id]);
+      giveLands(game, 0, 'Forest', 2);
+      // Mill four permanent cards so there is a choice to make.
+      for (var i = 0; i < 4; i++) {
+        final id = game.newObject(cardID: db.byName('Mugato')!.id, owner: 0, zone: Zone.library);
+        game.state.players[0].library.insert(0, id);
+      }
+      final life = game.state.players[0].life;
+      game.apply(CastAction(game.state.players[0].hand.first));
+      passWindows(game);
+      final pending = game.state.pending;
+      expect(pending?.decision, isA<ChooseCardsDecision>());
+      final pick = (pending!.decision as ChooseCardsDecision).cards.first;
+      game.apply(RespondAction(CardsResponse([pick])));
+      expect(game.state.objects[pick]!.zone, Zone.hand);
+      expect(game.state.players[0].life, life + 2, reason: 'first spell of the game');
     });
   });
 }

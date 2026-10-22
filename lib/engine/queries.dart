@@ -240,6 +240,8 @@ extension GameQueries on Game {
         if (!c.isArtifact || !c.isCreature) return false;
       case FilterKind.token:
         if (!o.isToken) return false;
+      case FilterKind.creatureToken:
+        if (!o.isToken || !c.isCreature) return false;
       case FilterKind.creatureCardInGraveyard:
       case FilterKind.cardInGraveyard:
       case FilterKind.permanentCardInGraveyard:
@@ -481,10 +483,18 @@ extension GameQueries on Game {
       if (o.tapped) continue;
       final parsed = parsedOf(o);
       if (parsed == null) continue;
-      final manaAbilities = parsed.abilities.whereType<ManaAbility>().where((m) => !m.artifactSpellsOnly || (forSpell?.isArtifact ?? false)).toList();
+      final manaAbilities = parsed.abilities.whereType<ManaAbility>().where((m) => m.amount > 0 && (!m.artifactSpellsOnly || (forSpell?.isArtifact ?? false))).toList();
       if (manaAbilities.isNotEmpty) {
         if (characteristics(o.id).isCreature && hasSummoningSickness(o)) continue;
-        out.add((o.id, manaAbilities.expand((m) => m.colors).toSet().toList(), false));
+        final best = manaAbilities.reduce((a, b) => b.amount > a.amount ? b : a);
+        if (best.amount > 1) {
+          // One tap, several mana (Gumato, Command Chair): one entry per mana.
+          for (var n = 0; n < best.amount; n++) {
+            out.add((o.id, List.of(best.colors), false));
+          }
+        } else {
+          out.add((o.id, manaAbilities.expand((m) => m.colors).toSet().toList(), false));
+        }
         continue;
       }
       for (final a in parsed.abilities) {
@@ -513,17 +523,27 @@ extension GameQueries on Game {
         needs.add(c);
       }
     }
+    // A source making several mana makes them all one color: once one is spent on a color, the
+    // rest of that source can only be that color.
+    void commit(int i, ManaColor color) {
+      final id = sources[i].$1;
+      used.add(id);
+      sources.removeAt(i);
+      if (id <= -1000) return;
+      for (var j = 0; j < sources.length; j++) {
+        if (sources[j].$1 == id) sources[j] = (id, [color], sources[j].$3);
+      }
+    }
+
     for (final color in needs) {
       final i = sources.indexWhere((s) => s.$2.contains(color));
       if (i < 0) return null;
-      used.add(sources[i].$1);
-      sources.removeAt(i);
+      commit(i, color);
     }
     for (final pair in cost.hybrid) {
       final i = sources.indexWhere((s) => s.$2.any(pair.contains));
       if (i < 0) return null;
-      used.add(sources[i].$1);
-      sources.removeAt(i);
+      commit(i, sources[i].$2.firstWhere(pair.contains));
     }
     var generic = cost.generic;
     sources.sort((a, b) {
@@ -632,8 +652,32 @@ extension GameQueries on Game {
     final cost = card.cost..generic += o.extraCost;
     reduceCost(cost, card, p, const []);
     if (manaPlan(cost, p, forSpell: card) == null) return false;
-    if (db.parsed(card).isAura && legalTargets(Filter.creature, p, id).isEmpty) return false;
+    if (db.parsed(card).isAura && legalTargets(auraFilter(card), p, id).isEmpty) return false;
     return true;
+  }
+
+  /// Extra mana for targeting permanents an opponent controls that have ward.
+  int wardTax(List<ObjectID> targets, PlayerID p) {
+    var tax = 0;
+    for (final t in targets) {
+      if (EffectContext.playerFromObject(t) != null) continue;
+      final o = state.objects[t];
+      if (o != null && o.zone == Zone.battlefield && o.controller != p) tax += characteristics(t).wardCost;
+    }
+    return tax;
+  }
+
+  /// Whether `p` can pay everything casting this card with these choices costs: mana cost, X,
+  /// kicker, ward on the targets, minus reductions.
+  bool canAffordCast(ObjectID id, PlayerID p, {List<ObjectID> targets = const [], bool kicked = false, int x = 0}) {
+    final o = state.objects[id];
+    final card = o == null ? null : cardOf(o);
+    if (o == null || card == null) return false;
+    final cost = card.cost..generic += o.extraCost + (card.cost.hasX ? x : 0) + wardTax(targets, p);
+    final k = db.parsed(card).kicker;
+    if (kicked && k != null) cost.add(k);
+    reduceCost(cost, card, p, targets);
+    return manaPlan(cost, p, forSpell: card) != null;
   }
 
   /// The largest X `p` can pay for when casting this card (0 when it has no X).
@@ -680,7 +724,7 @@ extension GameQueries on Game {
   /// Whether every required target of the card (in at least one mode) has a legal choice.
   bool _hasTargetsFor(Card card, PlayerID p, ObjectID id) {
     final parsed = db.parsed(card);
-    if (parsed.isAura) return legalTargets(Filter.creature, p, id).isNotEmpty;
+    if (parsed.isAura) return legalTargets(auraFilter(card), p, id).isNotEmpty;
     final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
     final modes = modal == null ? <int?>[null] : List<int?>.generate(modal.modes.length, (i) => i);
     for (final m in modes) {
@@ -702,13 +746,31 @@ extension GameQueries on Game {
 
   int landsAllowed(PlayerID p) => 1 + state.permanentsOf(p).where((o) => parsedOf(o)?.statics.contains(SimpleStatic.extraLandEachTurn) == true).length;
 
+  /// What an Aura can enchant: "Enchant creature", "Enchant artifact or creature", "Enchant
+  /// creature an opponent controls".
+  Filter auraFilter(Card card) {
+    final statics = db.parsed(card).statics;
+    if (statics.contains(SimpleStatic.enchantArtifactOrCreature)) return Filter(FilterKind.artifactOrCreature);
+    if (statics.contains(SimpleStatic.enchantCreatureOpponentControls)) return Filter(FilterKind.creature, controller: Controller.opponent);
+    return Filter.creature;
+  }
+
+  /// Whether a permanent can still carry this Aura (an artifact Aura host must stay an artifact
+  /// or creature, a creature Aura host a creature).
+  bool auraFits(GameObject aura, ObjectID host) {
+    final card = cardOf(aura);
+    final c = characteristics(host);
+    if (card == null) return c.isCreature;
+    return auraFilter(card).kind == FilterKind.artifactOrCreature ? (c.isCreature || c.isArtifact) : c.isCreature;
+  }
+
   /// The spell's targets the caster must pick, in order: each `ChosenTarget` in its effects.
   /// Kicked, a spell whose "instead" text names its own target (Highly Illogical) asks for that
   /// one; one that reuses "that creature" (Burst Lightning) keeps the unkicked target.
   List<TargetRequirement> targetRequirementsForCard(Card card, int? mode, {bool kicked = false}) {
     final parsed = db.parsed(card);
     var effects = parsed.spellEffects;
-    if (parsed.isAura) return [TargetRequirement(Filter.creature, 1, false)];
+    if (parsed.isAura) return [TargetRequirement(auraFilter(card), 1, false)];
     if (mode != null) {
       final modal = effects.whereType<Modal>().firstOrNull;
       if (modal != null && mode < modal.modes.length) effects = modal.modes[mode];
