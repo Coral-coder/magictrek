@@ -77,8 +77,9 @@ push it on any branch, or push a tag like `v1.2.0`: CI then ships both platforms
   the next build cannot update over it (the app says so and asks to uninstall first).
 - **iOS**: `.github/workflows/ios-testflight.yml` archives `ios/Runner` and uploads to TestFlight
   on the same commits (`*b` archives without uploading; the workflow can also be run by hand).
-  The version lives in `pubspec.yaml` (`version: 1.0.0+1`); after an upload the workflow writes
-  the numbers it used back. TestFlight installs updates itself. Secrets: `APPLE_TEAM_ID`,
+  The version is the one in `pubspec.yaml` (`version: 1.0.0+1`); the build number is the
+  workflow's run number (or the next one App Store Connect expects). TestFlight installs updates
+  itself. Secrets: `APPLE_TEAM_ID`,
   `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`.
 - **Every pull request**: `.github/workflows/flutter-ci.yml` runs the analyzer and tests, builds a
   debug APK (artifact) and an unsigned iOS build.

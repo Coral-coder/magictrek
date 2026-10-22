@@ -28,7 +28,8 @@
 #
 # The current version and build are MARKETING_VERSION and CURRENT_PROJECT_VERSION in the
 # project; after an upload the workflow commits the numbers it used back to the branch (that
-# commit doesn't trigger workflows). The build number is also checked against App Store Connect,
+# commit doesn't trigger workflows). A Flutter app's version is pubspec.yaml's and its build
+# number is this workflow's run number, so nothing is written back. The build number is also checked against App Store Connect,
 # so a build uploaded by hand from Xcode never collides.
 #
 # Signing is automatic ("cloud signing") with the App Store Connect API key.
@@ -296,6 +297,9 @@ jobs:
             else
               build=1                        # new version: builds start over
             fi
+            # A Flutter app keeps nothing in the repo (see "Record the version and build"): the
+            # workflow's run number is the floor, which only ever grows.
+            if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ] && [ "$GITHUB_RUN_NUMBER" -gt "$build" ]; then build="$GITHUB_RUN_NUMBER"; fi
             # Never reuse a number App Store Connect already has (e.g. a build uploaded from Xcode).
             if asc_next=$(python3 "$ASC" next-build --bundle-id "$BUNDLE_ID" --version "$version"); then
               if [ "$asc_next" -gt "$build" ]; then build="$asc_next"; fi
@@ -440,6 +444,10 @@ jobs:
       - name: Record the version and build
         if: env.UPLOAD == 'true'
         run: |
+          # A Flutter app gets its number from the run and App Store Connect, so nothing is
+          # written back: a commit pushed by the workflow's token runs no CI and leaves the
+          # pull request's head unchecked until someone approves the run by hand.
+          if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then echo "Flutter app: nothing to record"; exit 0; fi
           # On the branch that was built; a tag records on main.
           branch="$GITHUB_REF_NAME"
           if [ "$GITHUB_REF_TYPE" != "branch" ]; then branch=main; fi
