@@ -1,0 +1,50 @@
+# Publishes the MagicTrek landing page to GitHub Pages (https://coral-coder.github.io/magictrek/).
+# It runs from main, because the github-pages environment only accepts deployments from the
+# default branch, and takes the site from the branch named in SITE_REF (the app's branch until it
+# is merged). Runs on a schedule-free push to main, by hand, or when the app branch changes the
+# site (see the same file on that branch).
+name: Website
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to publish the site from"
+        required: false
+        default: startrek-game
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'startrek-game' }}
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/img
+          cp site/* _site/
+          for f in trk-7 trk-142 trk-74 trc-1 trk-80 trk-273 trk-69 trc-199; do cp "assets/images/$f.jpg" _site/img/; done
+          cp assets/icon.png _site/img/icon.png
+          touch _site/.nojekyll
+          ls -la _site _site/img
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
