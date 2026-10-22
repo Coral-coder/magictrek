@@ -636,6 +636,30 @@ extension GameQueries on Game {
     return true;
   }
 
+  /// The largest X `p` can pay for when casting this card (0 when it has no X).
+  int maxX(ObjectID id, PlayerID p) {
+    final o = state.objects[id];
+    final card = o == null ? null : cardOf(o);
+    if (o == null || card == null || !card.cost.hasX) return 0;
+    var x = 0;
+    while (x < 20) {
+      final cost = card.cost..generic += o.extraCost + x + 1;
+      reduceCost(cost, card, p, const []);
+      if (manaPlan(cost, p, forSpell: card) == null) break;
+      x++;
+    }
+    return x;
+  }
+
+  /// Whether the card's sacrifice kicker ("Kicker—Sacrifice an artifact or creature") can be paid.
+  bool canSacrificeKick(ObjectID id, PlayerID p) {
+    final card = this.card(id);
+    final sk = card == null ? null : db.parsed(card).abilities.whereType<SacrificeKicker>().firstOrNull;
+    if (sk == null) return false;
+    final f = sk.filter.copy()..controller = Controller.you;
+    return state.permanentsOf(p).any((c) => matches(f, c.id, p, id));
+  }
+
   /// Whether `p` holds an instant or flash card they could cast in response right now, with a
   /// target for it. Windows to respond only open when this is true, so nobody is asked to pass
   /// when they have nothing.

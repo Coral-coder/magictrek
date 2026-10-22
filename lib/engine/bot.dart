@@ -301,7 +301,14 @@ class Bot {
       if (k != null) {
         final cost = card.cost..add(k);
         kicked = game.canPay(cost, p) && game.targetRequirementsForCard(card, mode, kicked: true).every((r) => r.optional || game.legalTargets(r.filter, p, id).isNotEmpty);
+      } else if (game.canSacrificeKick(id, p)) {
+        // Only tokens are fodder for the kicker.
+        final sk = parsed.abilities.whereType<SacrificeKicker>().first;
+        final f = sk.filter.copy()..controller = Controller.you;
+        kicked = game.state.permanentsOf(p).any((o) => o.isToken && game.matches(f, o.id, p, id));
       }
+      final x = game.maxX(id, p);
+      if (card.cost.hasX && x == 0 && parsed.spellEffects.any((e) => e is Damage)) continue;
       final targets = <ObjectID>[];
       var ok = true;
       var targetValue = 0;
@@ -330,7 +337,7 @@ class Bot {
       if (game.state.players[opp].life <= 0) continue;
       if (score > bestScore) {
         bestScore = score;
-        best = CastAction(id, targets: targets, kicked: kicked, mode: mode);
+        best = CastAction(id, targets: targets, kicked: kicked, mode: mode, x: x);
       }
     }
     return best;

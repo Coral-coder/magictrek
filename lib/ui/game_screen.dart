@@ -68,10 +68,11 @@ sealed class Purpose {
 }
 
 class CastPurpose extends Purpose {
-  const CastPurpose(this.card, {this.kicked = false, this.mode});
+  const CastPurpose(this.card, {this.kicked = false, this.mode, this.x = 0});
   final ObjectID card;
   final bool kicked;
   final int? mode;
+  final int x;
 }
 
 class ActivatePurpose extends Purpose {
@@ -164,6 +165,7 @@ class _GameScreenState extends State<GameScreen> {
       final c = card.cost..add(k);
       kickable = game.canPay(c, me);
     }
+    if (game.canSacrificeKick(id, me)) kickable = true;
     final modal = parsed.spellEffects.any((e) => e is Modal);
     if (kickable || modal || canCycle(id) || zoneAbilities(id).isNotEmpty || !game.canCast(id, me)) {
       showCastMenu(id);
@@ -196,6 +198,10 @@ class _GameScreenState extends State<GameScreen> {
       }
       final k = parsed.kicker;
       if (k != null) items.add(_sheetButton('Cast with kicker (+$k)', () => beginCast(id, kicked: true, mode: null)));
+      final sk = parsed.abilities.whereType<SacrificeKicker>().firstOrNull;
+      if (sk != null) {
+        items.add(_sheetButton('Cast with kicker (sacrifice ${sk.filter.kind == FilterKind.artifactOrCreature ? 'an artifact or creature' : 'a permanent'})', () => beginCast(id, kicked: true, mode: null), enabled: game.canSacrificeKick(id, me)));
+      }
     }
     final cyc = parsed.cycling;
     if (cyc != null && canCycle(id)) items.add(_sheetButton('${cyc.landType == null ? 'Cycling' : 'Landcycling'} ${cyc.cost}', () => perform(CycleAction(id))));
@@ -312,19 +318,27 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  void beginCast(ObjectID id, {required bool kicked, int? mode}) {
+  void beginCast(ObjectID id, {required bool kicked, int? mode, int? x}) {
     final card = game.card(id);
     if (card == null) return;
+    if (card.cost.hasX && x == null) {
+      final most = game.maxX(id, me);
+      final labels = [for (var i = 0; i <= most; i++) 'X = $i'];
+      showPickSheet('${card.name}: choose X', labels: labels, min: 1, max: 1, onDone: (picks) {
+        if (picks.isNotEmpty) beginCast(id, kicked: kicked, mode: mode, x: picks.first);
+      });
+      return;
+    }
     final reqs = game.targetRequirementsForCard(card, mode, kicked: kicked).where((r) => game.legalTargets(r.filter, me, id).isNotEmpty).toList();
     if (reqs.isEmpty) {
-      perform(CastAction(id, kicked: kicked, mode: mode));
+      perform(CastAction(id, kicked: kicked, mode: mode, x: x ?? 0));
     } else {
       setState(() {
         selectedHandCard = id;
         interaction = Targeting(
           requirements: reqs,
           chosen: const [],
-          purpose: CastPurpose(id, kicked: kicked, mode: mode),
+          purpose: CastPurpose(id, kicked: kicked, mode: mode, x: x ?? 0),
         );
       });
     }
@@ -488,7 +502,7 @@ class _GameScreenState extends State<GameScreen> {
     if (t is! Targeting) return;
     switch (t.purpose) {
       case CastPurpose p:
-        perform(CastAction(p.card, targets: t.chosen, kicked: p.kicked, mode: p.mode));
+        perform(CastAction(p.card, targets: t.chosen, kicked: p.kicked, mode: p.mode, x: p.x));
       case ActivatePurpose p:
         ObjectID? sacrifice;
         final obj = state.objects[p.object];
@@ -1543,6 +1557,19 @@ class _GameScreenState extends State<GameScreen> {
             ),
           // Cards playable from elsewhere right now: exiled by an effect, the top of the library,
           // the graveyard. They sit after the hand with where they are written above them.
+          // Captain Pike, Benjamin Sisko: the top card of the library is always visible to its owner.
+          if (!hidden && game.controlsStatic(me, SimpleStaticKind.lookAtTop))
+            if (state.players[me].library.firstOrNull case final top? when !game.extraPlayables(me).contains(top))
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('TOP (LOOK)', style: LCARS.font(9, color: LCARS.lavender)),
+                    HandCardView(session: session!, objectID: top, width: 76, playable: false, selected: false, onTap: () => inspect(top), onLongPress: () => inspect(top)),
+                  ],
+                ),
+              ),
           if (!hidden)
             for (final id in game.extraPlayables(me))
               Padding(

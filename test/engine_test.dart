@@ -485,5 +485,30 @@ void main() {
       passWindows(game);
       expect(game.state.winner, 1);
     });
+    test('Khaaaaaaaaaaaannn! deals twice X and exiles the creature', () {
+      final game = makeGame([db.byName('Khaaaaaaaaaaaannn!')!.id]);
+      giveLands(game, 0, 'Mountain', 4);
+      final enemy = putOnTable(game, 1, 'Lieutenant Commander Data');
+      final spell = game.state.players[0].hand.first;
+      expect(game.maxX(spell, 0), 3);
+      game.apply(CastAction(spell, targets: [enemy], x: 2));
+      passWindows(game);
+      expect(game.state.objects[enemy]!.zone, Zone.exile, reason: '4 damage kills a 2/2 (+counters), and it is exiled instead');
+    });
+
+    test('Eject the Warp Core: the sacrifice kicker makes it -6/-6', () {
+      final game = makeGame([db.byName('Eject the Warp Core')!.id]);
+      giveLands(game, 0, 'Swamp', 2);
+      game.createToken(TokenSpec(name: 'Crew', power: 1, toughness: 1), 0);
+      final crew = tokenOf(game, 0);
+      final enemy = putOnTable(game, 1, 'Lieutenant Commander Data');
+      game.state.objects[enemy]!.counters[CounterKind.plusOne] = 3;
+      final spell = game.state.players[0].hand.first;
+      expect(game.canSacrificeKick(spell, 0), isTrue);
+      game.apply(CastAction(spell, targets: [enemy], kicked: true));
+      passWindows(game);
+      expect(game.state.objects[crew], isNull, reason: 'the token was sacrificed');
+      expect(game.state.objects[enemy]!.zone, Zone.graveyard, reason: '5/6 with -6/-6 dies');
+    });
   });
 }
