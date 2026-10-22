@@ -1,0 +1,58 @@
+# Builds the app for the iOS Simulator and runs the rules-engine tests on every pull request and
+# on pushes to feature branches, so compile errors show up before anything reaches TestFlight.
+# No signing is involved.
+name: iOS build
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26 or later
+        run: |
+          xcode=$(ls -d /Applications/Xcode_2[6-9]*.app /Applications/Xcode_[3-9][0-9]*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$xcode" ]; then echo "::error::No Xcode 26+ on this runner:"; ls -d /Applications/Xcode*.app; exit 1; fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      - name: Rules engine tests
+        working-directory: Packages/MagicTrekCore
+        run: swift test 2>&1 | tail -40
+
+      - name: Generate the Xcode project
+        run: |
+          brew install --quiet xcodegen
+          xcodegen generate
+
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project MagicTrek.xcodeproj -scheme MagicTrek -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee build/xcodebuild.log | grep -E 'error:|warning: unre|BUILD|Compiling|CompileSwift' | grep -vE '^\s*$' | tail -60
+          if grep -qE 'BUILD FAILED' build/xcodebuild.log; then
+            grep -E ': error: ' build/xcodebuild.log | sort -u | head -40 | while IFS= read -r line; do echo "::error::${line#"$GITHUB_WORKSPACE"/}"; done
+            exit 1
+          fi
+
+      - name: Keep the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 3

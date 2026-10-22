@@ -1,0 +1,42 @@
+DEFINE SCHEMA
+
+    RECORD TYPE Match (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        code            STRING QUERYABLE,
+        hostName        STRING,
+        hostUser        STRING QUERYABLE,
+        guestName       STRING,
+        guestUser       STRING QUERYABLE,
+        seed            INT64,
+        status          STRING QUERYABLE,
+        hostDeck        STRING,
+        guestDeck       STRING,
+        lastSeq         INT64,
+        turnUser        STRING QUERYABLE,
+        winnerUser      STRING,
+        GRANT WRITE TO "_creator",
+        GRANT WRITE TO "_icloud",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE MatchAction (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE QUERYABLE,
+        match           REFERENCE QUERYABLE,
+        seq             INT64 QUERYABLE SORTABLE,
+        player          INT64 QUERYABLE,
+        payload         STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );

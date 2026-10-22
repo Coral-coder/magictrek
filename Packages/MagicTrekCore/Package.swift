@@ -15,6 +15,7 @@ let package = Package(
         .target(name: "CardKit", resources: [.copy("Resources/cards.json")]),
         .target(name: "GameEngine", dependencies: ["CardKit"]),
         .executableTarget(name: "CardTool", dependencies: ["CardKit"]),
+        .executableTarget(name: "SimTool", dependencies: ["CardKit", "GameEngine"]),
         .testTarget(name: "CardKitTests", dependencies: ["CardKit"]),
         .testTarget(name: "GameEngineTests", dependencies: ["GameEngine", "CardKit"]),
     ]
