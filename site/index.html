@@ -67,12 +67,11 @@
   .btn { display: inline-flex; align-items: center; gap: 10px; height: 54px; padding: 0 26px; border-radius: 27px; background: var(--c, var(--orange)); color: var(--black); text-decoration: none; text-transform: uppercase; font-weight: 700; font-size: 18px; letter-spacing: .08em; transition: transform .15s, filter .15s, box-shadow .15s; box-shadow: 0 0 0 0 rgba(255,153,0,0); }
   .btn:hover { transform: translateY(-2px); filter: brightness(1.08); box-shadow: 0 0 24px 0 color-mix(in srgb, var(--c, var(--orange)) 50%, transparent); }
   .btn.ghost { background: transparent; color: var(--c, var(--orange)); border: 2px solid var(--c, var(--orange)); }
-  .btn.ghost.soon { opacity: .6; cursor: default; }
-  .btn.ghost.soon:hover { transform: none; box-shadow: none; filter: none; }
   .btn > span { display: flex; flex-direction: column; line-height: 1; gap: 3px; }
   .btn small { font-size: 11px; opacity: .8; font-weight: 400; letter-spacing: .12em; }
   .btn svg { width: 22px; height: 22px; }
-  .qr { background: #fff; border-radius: 18px; padding: 14px; width: min(100%, 260px); justify-self: center; position: relative; }
+  .qrs { display: flex; gap: 22px; justify-self: center; flex-wrap: wrap; justify-content: center; }
+  .qr { background: #fff; border-radius: 18px; padding: 12px; width: 180px; position: relative; }
   .qr img { width: 100%; display: block; }
   .qr span { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); background: var(--gold); color: var(--black); font-size: 12px; font-weight: 700; text-transform: uppercase; padding: 4px 12px; border-radius: 12px; white-space: nowrap; letter-spacing: .1em; }
 
@@ -121,7 +120,7 @@
     .layout { grid-template-columns: 1fr; }
     .spine { display: none; }
     .hero { grid-template-columns: 1fr; }
-    .qr { width: min(100%, 220px); }
+    .qr { width: min(42vw, 170px); }
     footer .bottom { grid-template-columns: 64px 1fr; }
   }
   @media (prefers-reduced-motion: reduce) { .sweep, .status i { animation: none; } }
@@ -156,16 +155,22 @@
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18c.16-.31.04-.69-.26-.85-.29-.15-.65-.06-.83.22l-1.88 3.24a11.4 11.4 0 0 0-8.94 0L5.65 5.67a.63.63 0 0 0-.87-.2c-.28.18-.37.54-.22.83L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/></svg>
               <span>Android APK<small id="apk-sub">latest release</small></span>
             </a>
-            <a class="btn ghost soon" style="--c: var(--ice)" href="#" aria-disabled="true" onclick="return false">
+            <a class="btn" style="--c: var(--ice)" href="https://testflight.apple.com/join/kmHpM5dq" id="testflight">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.63c-.02-2.3 1.88-3.4 1.96-3.45-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.48.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.73c1.24-.02 2.03-1.13 2.79-2.25.88-1.29 1.24-2.54 1.26-2.61-.03-.01-2.42-.93-2.47-3.72zM14.1 5.9c.64-.77 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.11 1.78-.97 2.83 1.03.08 2.07-.52 2.71-1.29z"/></svg>
-              <span>iPhone · TestFlight<small>coming soon</small></span>
+              <span>iPhone · TestFlight<small>join the beta</small></span>
             </a>
           </div>
           <div class="status"><i></i><span id="release-line">Querying the release manifest…</span></div>
         </div>
-        <div class="qr">
-          <img src="qr.svg" alt="QR code linking to the latest Android APK">
-          <span>Scan to install</span>
+        <div class="qrs">
+          <div class="qr">
+            <img src="qr.svg" alt="QR code linking to the latest Android APK">
+            <span>Android</span>
+          </div>
+          <div class="qr">
+            <img src="qr-ios.svg" alt="QR code linking to the TestFlight beta for iPhone">
+            <span>iPhone</span>
+          </div>
         </div>
       </section>
 
@@ -211,7 +216,7 @@
       <section>
         <div class="head" style="--c: var(--blue)"><h2>Engage</h2></div>
         <ol class="steps" style="--c: var(--blue)">
-          <li><b>Install.</b> Android: scan the code or tap the APK button, open the download, allow installs from your browser once. iPhone: scan the TestFlight code or tap the TestFlight button. No install at all: play online in your browser below.</li>
+          <li><b>Install.</b> Android: scan the code or tap the APK button, open the download, allow installs from your browser once. iPhone: scan the other code or tap the TestFlight button, install TestFlight if asked, then accept the invite. No install at all: play online in your browser below.</li>
           <li><b>Pick a deck.</b> Six starter decks, one per faction, or build your own from the full set in the card database.</li>
           <li><b>Find your opponent.</b> Nearby: one phone hosts, the other taps the host’s name or types the host’s IP address. Remote: share the match code; it works between the apps and the browser.</li>
           <li><b>Play.</b> Tap to target, drag nothing, argue about nothing: the engine enforces the rules on both phones at once.</li>

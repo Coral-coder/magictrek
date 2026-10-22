@@ -18,6 +18,7 @@ friend nearby over Wi‑Fi or Bluetooth, or play anyone anywhere through public 
 | `lib/ui/` | LCARS widgets and screens. |
 | `test/` | Engine, networking and widget tests (`flutter test`). |
 | `tool/cardtool.dart` | `dart run tool/cardtool.dart` reports parser coverage; `dart run tool/cardtool.dart "Picard"` shows one card. |
+| `swift/` | The earlier native SwiftUI version (iOS only, CloudKit multiplayer): `xcodegen generate` in `swift/` makes the Xcode project, and its rules package tests with `swift test` in `swift/Packages/MagicTrekCore`. Not shipped; the Swift build workflow compiles it when `swift/` changes. |
 
 ## Building
 
@@ -101,7 +102,7 @@ push it on any branch, or push a tag like `v1.2.0`: CI then ships both platforms
   Without any of this the APK is signed with the runner's throwaway debug key: it installs, but
   the next build cannot update over it (the app says so and asks to uninstall first).
 - **iOS**: `.github/workflows/ios-testflight.yml` archives `ios/Runner` and uploads to TestFlight
-  on the same commits (`*b` archives without uploading; the workflow can also be run by hand).
+  (public beta: https://testflight.apple.com/join/kmHpM5dq) on the same commits (`*b` archives without uploading; the workflow can also be run by hand).
   The version is the one in `pubspec.yaml` (`version: 1.0.0+1`); the build number is the
   workflow's run number (or the next one App Store Connect expects). TestFlight installs updates
   itself. Secrets: `APPLE_TEAM_ID`,
