@@ -828,11 +828,12 @@ class _GameScreenState extends State<GameScreen> {
     final d = pending.decision;
     switch (d) {
       case MulliganDecision _:
+        final taken = state.players[pending.player].mulligans;
         return Row(children: [
-          Expanded(child: Text('Keep this hand?', style: LCARS.font(12, color: LCARS.gold))),
+          Expanded(child: Text(taken == 0 ? 'Keep this hand?' : 'Keep this hand of ${7 - taken}?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
           _small('Keep', () => perform(const RespondAction(KeepResponse())), color: LCARS.green, width: 76),
           const SizedBox(width: 4),
-          _small('Mulligan', () => perform(const RespondAction(MulliganResponse())), color: LCARS.red, fill: false, width: 92),
+          _small('Mulligan', () => perform(const RespondAction(MulliganResponse())), color: LCARS.red, fill: false, width: 124),
         ]);
       case DeclareBlockersDecision _:
         return LcarsButton('Declare blockers', color: LCARS.skyBlue, height: 36, onPressed: () => setState(() => interaction = const Blocking(assignments: {})));
