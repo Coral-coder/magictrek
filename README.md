@@ -60,16 +60,26 @@ running (foreground or background) to notice a remote move.
 
 ## Releases
 
-- **Android**: `.github/workflows/android-release.yml` builds the release APK and attaches it to a
-  GitHub Release. Push a tag like `v1.2.0` for a numbered release, put `*u` in a commit subject on
-  `main` or run the workflow by hand for a pre-release. With the `ANDROID_KEYSTORE_BASE64`,
-  `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` secrets the APK is
-  signed with your key; without them it is signed with the debug key (installs fine, but can't be
-  updated by a differently signed build later).
-- **iOS**: `.github/workflows/ios-testflight.yml` archives `ios/Runner` and uploads to TestFlight.
-  Put `*u` in a commit subject on `main` to upload, `*b` to archive only, or run it by hand. The
-  version lives in `pubspec.yaml` (`version: 1.0.0+1`); after an upload the workflow writes the
-  numbers it used back. Secrets: `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`.
+Put the word **build** in a commit subject (`Build: new card art`, `build`, `*u` also works) and
+push it on any branch, or push a tag like `v1.2.0`: CI then ships both platforms from that commit.
+
+- **Android**: `.github/workflows/android-release.yml` builds the release APK and publishes a
+  GitHub Release (`build-<n>`, or the tag) carrying `MagicTrek.apk` and `update.json`. The link
+  <https://github.com/Coral-coder/magictrek/releases/latest/download/MagicTrek.apk> always
+  downloads the newest build, so one QR code of it stays valid forever. Installed copies read
+  `update.json` on launch and offer the newer build in-app (Settings also has *Check for
+  updates*); the download opens Android's installer and the app updates in place.
+  That in-place update needs every build signed with the same key: add the repository secrets
+  `ANDROID_KEYSTORE_BASE64` (the `.jks` file, base64), `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` once. Make a key with
+  `keytool -genkeypair -keystore magictrek.jks -storetype PKCS12 -alias magictrek -keyalg RSA -keysize 2048 -validity 36500`.
+  Without the secrets the APK is signed with the runner's throwaway debug key: it installs, but
+  the next build cannot update over it (the app says so and asks to uninstall first).
+- **iOS**: `.github/workflows/ios-testflight.yml` archives `ios/Runner` and uploads to TestFlight
+  on the same commits (`*b` archives without uploading; the workflow can also be run by hand).
+  The version lives in `pubspec.yaml` (`version: 1.0.0+1`); after an upload the workflow writes
+  the numbers it used back. TestFlight installs updates itself. Secrets: `APPLE_TEAM_ID`,
+  `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`.
 - **Every pull request**: `.github/workflows/flutter-ci.yml` runs the analyzer and tests, builds a
   debug APK (artifact) and an unsigned iOS build.
 

@@ -33,8 +33,9 @@ android {
     }
 
     signingConfigs {
-        // Release signing comes from the environment (CI secrets); without it the debug key is
-        // used so a sideloadable APK always builds.
+        // Release signing comes from the environment (the ANDROID_KEYSTORE_* CI secrets); without
+        // it the debug key is used so a sideloadable APK always builds. Only a fixed key lets the
+        // in-app updater install a newer release over an older one (see README, "Releases").
         create("release") {
             val storePath = System.getenv("ANDROID_KEYSTORE_PATH")
             if (storePath != null && file(storePath).exists()) {
@@ -66,4 +67,5 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("androidx.core:core-ktx:1.15.0") // FileProvider for the in-app updater
 }

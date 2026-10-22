@@ -8,6 +8,7 @@ import 'ui/game_screen.dart';
 import 'ui/lcars.dart';
 import 'ui/lobbies.dart';
 import 'ui/menu.dart';
+import 'ui/update.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,7 +48,7 @@ class _MagicTrekAppState extends State<MagicTrekApp> with WidgetsBindingObserver
       debugShowCheckedModeBanner: false,
       home: ListenableBuilder(
         listenable: AppStore.shared,
-        builder: (context, _) => AppStore.shared.ready ? const MainMenuScreen() : const _Loading(),
+        builder: (context, _) => AppStore.shared.ready ? const UpdateCheck(child: MainMenuScreen()) : const _Loading(),
       ),
       onGenerateRoute: (settings) {
         final args = settings.arguments;

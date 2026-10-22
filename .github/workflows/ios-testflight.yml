@@ -1,10 +1,11 @@
 # Archives the iOS app and (optionally) uploads it to TestFlight. Installed by Dev_deploy_setup
 # (Actions → Set up app repo there); it's the MagicMaker / ePTT workflow made generic. It is driven
-# by markers in the subject (first line) of the commit message of a push to main:
+# by markers in the subject (first line) of the commit message of a push to any branch:
 #
 #   no marker   nothing happens
 #   *b          archive and sign only, as a check; nothing is uploaded
 #   *u          archive and upload to TestFlight, same version, build number + 1
+#   build       (the word, any case) same as *u; the Android release workflow reacts to it too
 #
 # To release a new version, tag the *u commit: `git tag v1.4.0` and push the tag with the
 # branch (`git push origin main v1.4.0`). That uploads 1.4.0 as build 1. Running the workflow
@@ -39,7 +40,7 @@ name: iOS TestFlight
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v[0-9]*"]
   workflow_dispatch:
     inputs:
@@ -75,6 +76,8 @@ jobs:
             build=true; upload=true
           else
             case "$message" in *'*u'*) build=true; upload=true ;; *'*b'*) build=true ;; esac
+            # "build" as a word in the subject ("Build: ...", "new build", "build it") uploads too.
+            if printf '%s' "$message" | grep -qiE '(^|[^[:alnum:]])build([^[:alnum:]]|$)'; then build=true; upload=true; fi
           fi
           # A tagged commit is handled by the tag's run, not the branch's, so it isn't built twice.
           if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$build" = true ]; then
@@ -250,7 +253,12 @@ jobs:
               | awk -v t="$scheme" '/^Build settings for action .* and target /{inside = ($NF == t":")} inside && /^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER = /{print $3; exit}')
           fi
           if [ -z "$bundle" ]; then echo "::error::Couldn't read the bundle ID; set the BUNDLE_ID variable"; exit 1; fi
-          name="${APP_NAME:-$scheme}"
+          name="$APP_NAME"
+          # A Flutter project's scheme is always "Runner"; the app's name is in its Info.plist.
+          if [ -z "$name" ] && [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then
+            name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' Runner/Info.plist 2>/dev/null || true)
+          fi
+          name="${name:-$scheme}"
           sku="${APP_SKU:-$(echo "$bundle" | tr '.' '-')}"
           echo "Project $project, scheme $scheme, bundle ID $bundle, app name $name"
           {
@@ -360,8 +368,10 @@ jobs:
       - name: Archive
         run: |
           mkdir -p build
+          # A Flutter app builds its CocoaPods workspace; anything else the project itself.
+          if [ -n "$WORKSPACE" ]; then target=(-workspace "$WORKSPACE"); else target=(-project "$PROJECT"); fi
           archive() {
-            xcodebuild ${WORKSPACE:+-workspace "$WORKSPACE"} ${WORKSPACE:--project "$PROJECT"} -scheme "$SCHEME" -configuration Release \
+            xcodebuild "${target[@]}" -scheme "$SCHEME" -configuration Release \
               -destination 'generic/platform=iOS' -archivePath "build/$SCHEME.xcarchive" \
               -allowProvisioningUpdates \
               -authenticationKeyPath "$ASC_KEY_PATH" \

@@ -1,17 +1,28 @@
-# Builds the release APK and attaches it to a GitHub Release.
-#   push a tag like v1.2.0        -> release "v1.2.0" with the APK
-#   *u in a commit subject on main -> pre-release "build-<n>" with the APK (the same marker that
-#                                     sends the iOS build to TestFlight)
-#   Run workflow                   -> pre-release "build-<n>"
+# Builds the release APK and publishes it as a GitHub Release, which the installed app then
+# offers as an in-app update (lib/app/updater.dart).
+#
+#   "build" anywhere in a commit subject   -> release "build-<n>" with the APK (any branch; the
+#   (whole word, any case) or *u              same markers send the iOS build to TestFlight)
+#   push a tag like v1.2.0                 -> release "v1.2.0" with the APK
+#   Run workflow                           -> release "build-<n>"
+#
+# Every release carries MagicTrek.apk and update.json (version name, version code = this
+# workflow's run number, APK link). The stable links
+#   https://github.com/<owner>/<repo>/releases/latest/download/MagicTrek.apk
+#   https://github.com/<owner>/<repo>/releases/latest/download/update.json
+# always point at the newest release; the app reads update.json on launch.
+#
 # Signing: with the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
-# ANDROID_KEY_PASSWORD secrets the APK is signed with that key; without them it is signed with the
-# debug key, which installs fine when sideloaded but can't be updated later by a differently
-# signed build.
+# ANDROID_KEY_PASSWORD secrets the APK is signed with that key, and in-app updates install over
+# the previous build. Without them it is signed with the runner's throwaway debug key: it installs
+# when sideloaded, but every build has a different signature, so an update means uninstalling
+# first. The workflow fails the run with a notice when the secrets are missing so this is never
+# silent; set the secrets once (README, "Releases") and it goes quiet.
 name: Android release
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v[0-9]*"]
   workflow_dispatch:
 
@@ -24,25 +35,42 @@ jobs:
     outputs:
       go: ${{ steps.plan.outputs.go }}
       tag: ${{ steps.plan.outputs.tag }}
-      prerelease: ${{ steps.plan.outputs.prerelease }}
+      subject: ${{ steps.plan.outputs.subject }}
     steps:
       - uses: actions/checkout@v4
       - id: plan
         run: |
-          go=false; tag=""; prerelease=true
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then go=true; tag="$GITHUB_REF_NAME"; prerelease=false
+          go=false; tag=""
+          subject=$(git log -1 --format=%s)
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then go=true; tag="$GITHUB_REF_NAME"
           elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then go=true; tag="build-$GITHUB_RUN_NUMBER"
           else
-            case "$(git log -1 --format=%s)" in *'*u'*) go=true; tag="build-$GITHUB_RUN_NUMBER" ;; esac
+            case "$subject" in *'*u'*) go=true ;; esac
+            if printf '%s' "$subject" | grep -qiE '(^|[^[:alnum:]])build([^[:alnum:]]|$)'; then go=true; fi
+            if [ "$go" = true ]; then
+              # A tagged commit is released by the tag's run, not the branch's.
+              git fetch --quiet --tags origin
+              if git tag --points-at HEAD | grep -qE '^v[0-9]+(\.[0-9]+){1,2}$'; then
+                echo "Tagged commit; the tag's run handles it."; go=false
+              else
+                tag="build-$GITHUB_RUN_NUMBER"
+              fi
+            fi
           fi
-          echo "go=$go" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "go=$go tag=$tag prerelease=$prerelease"
+          echo "go=$go" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+          echo "go=$go tag=$tag subject=$subject"
 
   apk:
     needs: plan
     if: needs.plan.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    concurrency:
+      group: android-release
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -53,16 +81,18 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Release keystore (optional)
+      - name: Release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
             echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "SIGNED=release" >> "$GITHUB_ENV"
             echo "Signing with the release keystore"
           else
-            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret; the APK is signed with the debug key"
+            echo "SIGNED=debug" >> "$GITHUB_ENV"
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: the APK is signed with a throwaway debug key, so the in-app updater cannot install the next build over this one. Add the ANDROID_KEYSTORE_* secrets (README, Releases)."
           fi
       - run: flutter pub get
       - name: Build
@@ -71,19 +101,42 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          version="${{ needs.plan.outputs.tag }}"
           name=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)
-          case "$version" in v*) name="${version#v}" ;; esac
+          case "$TAG" in v*) name="${TAG#v}" ;; esac
           flutter build apk --release --build-name "$name" --build-number "$GITHUB_RUN_NUMBER"
-          cp build/app/outputs/flutter-apk/app-release.apk "MagicTrek-$version.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk MagicTrek.apk
+          echo "VERSION_NAME=$name" >> "$GITHUB_ENV"
+      - name: Describe the release
+        env:
+          SUBJECT: ${{ needs.plan.outputs.subject }}
+        run: |
+          apk="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/MagicTrek.apk"
+          python3 - "$VERSION_NAME" "$GITHUB_RUN_NUMBER" "$TAG" "$apk" "$SUBJECT" "$SIGNED" <<'PY'
+          import json, sys
+          name, code, tag, apk, subject, signed = sys.argv[1:7]
+          json.dump({"versionName": name, "versionCode": int(code), "tag": tag, "apk": apk,
+                     "notes": subject, "signing": signed}, open("update.json", "w"), indent=2)
+          PY
+          cat update.json
+          {
+            echo "MagicTrek $VERSION_NAME (build $GITHUB_RUN_NUMBER) for Android, from \`${GITHUB_SHA::7}\`: $SUBJECT"
+            echo
+            echo "- **Install**: download \`MagicTrek.apk\` below on the phone and open it (allow installs from your browser when asked)."
+            echo "- **Always the newest build**: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/MagicTrek.apk"
+            echo "- Installed copies offer this build as an update on launch."
+            if [ "$SIGNED" = debug ]; then
+              echo "- Signed with a throwaway debug key (no \`ANDROID_KEYSTORE_*\` secrets): uninstall the previous build before installing this one."
+            fi
+          } > notes.md
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.plan.outputs.tag }}
-          name: MagicTrek ${{ needs.plan.outputs.tag }}
-          prerelease: ${{ needs.plan.outputs.prerelease }}
-          generate_release_notes: true
-          files: MagicTrek-${{ needs.plan.outputs.tag }}.apk
+          tag_name: ${{ env.TAG }}
+          name: MagicTrek ${{ env.VERSION_NAME }} (build ${{ github.run_number }})
+          body_path: notes.md
+          files: |
+            MagicTrek.apk
+            update.json
       - name: Remove keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.keystore"

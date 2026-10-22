@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app/store.dart';
+import '../app/updater.dart';
 import 'lcars.dart';
+import 'update.dart';
 
 class MainMenuScreen extends StatelessWidget {
   const MainMenuScreen({super.key});
@@ -132,6 +134,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             decoration: const InputDecoration(isDense: true, filled: true, fillColor: LCARS.panel, border: OutlineInputBorder(borderSide: BorderSide.none)),
             onChanged: (v) => store.setRelays(v.split('\n')),
           ),
+          if (Updater.shared.supported) ...[
+            const LcarsHeader('Updates', color: LCARS.green),
+            Text('Builds are published on GitHub Releases; the app checks on launch and installs over itself.', style: LCARS.label),
+            const SizedBox(height: 6),
+            ListenableBuilder(
+              listenable: Updater.shared,
+              builder: (context, _) {
+                final u = Updater.shared;
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  LcarsButton(u.checking ? 'Checking…' : 'Check for updates', icon: Icons.system_update, color: LCARS.green, fill: false, height: 36, onPressed: u.checking ? null : () async {
+                    final release = await u.check();
+                    if (!context.mounted) return;
+                    if (release != null) {
+                      UpdateDialog.show(context, release);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(u.error ?? 'Up to date: ${u.installedVersion} (build ${u.installedCode})')));
+                    }
+                  }),
+                  if (u.installedCode > 0) ...[const SizedBox(height: 4), Text('Installed ${u.installedVersion} (build ${u.installedCode})', style: LCARS.small.copyWith(color: LCARS.gray))],
+                ]);
+              },
+            ),
+          ],
           const LcarsHeader('Data', color: LCARS.gold),
           LcarsButton('Restore starter decks', color: LCARS.gold, fill: false, height: 36, onPressed: store.restoreStarterDecks),
           if (store.savedGame != null) ...[const SizedBox(height: 6), LcarsButton('Discard saved game', color: LCARS.red, fill: false, height: 36, onPressed: store.clearSavedGame)],
