@@ -1,28 +1,66 @@
-# The landing page in site/ is published by the Website workflow on main (the github-pages
-# environment only accepts deployments from the default branch). On this branch the same
-# workflow just asks main's copy to publish the site from here whenever site/ changes.
+# Publishes the MagicTrek landing page in site/ to GitHub Pages
+# (https://coral-coder.github.io/magictrek/).
+# The github-pages environment only accepts deployments from main, so the deploy job runs there
+# only. On any other branch the publish job asks main's copy of this workflow to publish the site
+# from that branch whenever site/ changes.
 name: Website
 
 on:
   push:
-    branches-ignore: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
     inputs:
       ref:
         description: "Branch to publish the site from"
         required: false
-        default: startrek-game
+        default: ""
 
 permissions:
   actions: write
   contents: read
+  pages: write
+  id-token: write
 
 jobs:
   publish:
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Ask main to publish this branch's site
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main -f ref="${GITHUB_REF_NAME}"
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref_name }}
+      - name: Use the app branch while main has no site yet
+        run: |
+          if [ ! -d site ]; then
+            git fetch --depth 1 origin startrek-game
+            git checkout FETCH_HEAD
+          fi
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/img
+          cp site/* _site/
+          for f in trk-7 trk-142 trk-74 trc-1 trk-80 trk-273 trk-69 trc-199; do cp "assets/images/$f.jpg" _site/img/; done
+          cp assets/icon.png _site/img/icon.png
+          touch _site/.nojekyll
+          ls -la _site _site/img
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
