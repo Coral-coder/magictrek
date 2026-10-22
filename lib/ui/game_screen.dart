@@ -477,8 +477,27 @@ class _GameScreenState extends State<GameScreen> {
                         final card = game.card(id);
                         final beam = card == null ? null : game.db.parsed(card).beamMeUp;
                         final canBeam = p == me && beam != null && state.activePlayer == me && state.phase.isMain && game.canPay(beam, me) && state.pending == null;
+                        // While a spell or ability is choosing targets, a card here that is a
+                        // legal target is picked by tapping it, like a permanent on the table.
+                        final targetable = (interaction is Targeting || interaction is DecisionTargets) && isCandidate(id);
                         return Column(children: [
-                          Expanded(child: LayoutBuilder(builder: (_, box) => GestureDetector(onTap: () => inspect(id), child: CardFace(card: card, width: box.maxWidth)))),
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder: (_, box) => GestureDetector(
+                                onTap: () {
+                                  if (!targetable) return inspect(id);
+                                  Navigator.pop(context);
+                                  tapPermanent(id);
+                                },
+                                onLongPress: () => inspect(id),
+                                child: Container(
+                                  decoration: targetable ? BoxDecoration(borderRadius: BorderRadius.circular(6), border: Border.all(color: LCARS.gold, width: 3)) : null,
+                                  child: CardFace(card: card, width: box.maxWidth),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (targetable) Text('TAP TO TARGET', style: LCARS.font(9, color: LCARS.gold)),
                           if (canBeam)
                             LcarsButton('Beam up $beam', height: 26, color: LCARS.blue, onPressed: () {
                               Navigator.pop(context);
@@ -701,6 +720,18 @@ class _GameScreenState extends State<GameScreen> {
 
   Widget _small(String label, VoidCallback? onTap, {Color color = LCARS.orange, bool fill = true, double width = 86}) => SizedBox(width: width, child: LcarsButton(label, height: 32, color: color, fill: fill, onPressed: onTap));
 
+  /// Buttons opening each graveyard that holds a legal target for the current choice; the
+  /// cards there are not on the table, so this is how the player reaches them.
+  List<Widget> graveyardTargetButtons(Iterable<ObjectID> candidates) {
+    final out = <Widget>[];
+    for (final p in state.players) {
+      if (!candidates.any((id) => p.graveyard.contains(id))) continue;
+      out.add(_small(p.id == me ? 'My grave' : "${p.name}'s grave", () => showGraveyard(p.id), color: LCARS.violet, width: 96));
+      out.add(const SizedBox(width: 4));
+    }
+    return out;
+  }
+
   Widget promptBar() {
     final i = interaction;
     switch (i) {
@@ -708,6 +739,7 @@ class _GameScreenState extends State<GameScreen> {
         final req = t.requirements.firstOrNull;
         return Row(children: [
           Expanded(child: Text(targetPrompt(req, t.chosen), style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+          if (req != null) ...graveyardTargetButtons(game.legalTargets(req.filter, me, null)),
           if (req != null && (req.filter.isPlayerFilter || req.filter.kind == FilterKind.creatureOrPlayer)) ...[
             if (req.filter.kind != FilterKind.opponent) _small('You', () => chooseTargetPlayer(me), color: LCARS.peach, fill: false, width: 60),
             const SizedBox(width: 4),
@@ -756,6 +788,7 @@ class _GameScreenState extends State<GameScreen> {
         if (decision is ChooseTargetsDecision) {
           return Row(children: [
             Expanded(child: Text('${decision.prompt} (${d.chosen.length}/${decision.count})', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+            ...graveyardTargetButtons(decision.candidates),
             if (decision.filter.isPlayerFilter || decision.filter.kind == FilterKind.creatureOrPlayer)
               for (final pid in decision.candidates.where((c) => EffectContext.playerFromObject(c) != null)) ...[
                 _small(game.name(pid), () {
@@ -839,7 +872,15 @@ class _GameScreenState extends State<GameScreen> {
       case DeclareBlockersDecision _:
         return LcarsButton('Declare blockers', color: LCARS.skyBlue, height: 36, onPressed: () => setState(() => interaction = const Blocking(assignments: {})));
       case ChooseTargetsDecision c:
-        return Row(children: [Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)), _small('Choose', () => setState(() => interaction = const DecisionTargets([])), color: LCARS.gold, width: 80)]);
+        return Row(children: [
+          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
+          _small('Choose', () {
+            setState(() => interaction = const DecisionTargets([]));
+            // Every candidate is in a graveyard (Death Is Irrelevant, Daniels…): open it.
+            final inGrave = state.players.where((p) => c.candidates.any(p.graveyard.contains)).toList();
+            if (inGrave.isNotEmpty && c.candidates.every((id) => inGrave.any((p) => p.graveyard.contains(id)))) showGraveyard(inGrave.first.id);
+          }, color: LCARS.gold, width: 80),
+        ]);
       case ChooseModeDecision c:
         return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
@@ -905,6 +946,7 @@ class _GameScreenState extends State<GameScreen> {
       FilterKind.artifact => 'artifact',
       FilterKind.enchantment => 'enchantment',
       FilterKind.land => 'land',
+      FilterKind.creatureCardInGraveyard => 'creature card in a graveyard',
       FilterKind.spacecraft => 'Spacecraft',
       FilterKind.creatureOrSpacecraft => 'creature or Spacecraft',
       _ => 'permanent',
