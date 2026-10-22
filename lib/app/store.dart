@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -16,7 +17,7 @@ import 'sound.dart';
 import 'updater.dart';
 
 /// App-wide state: settings, decks, the saved local game, the current session.
-class AppStore extends ChangeNotifier {
+class AppStore extends ChangeNotifier implements MatchArchive {
   AppStore._();
   static final AppStore shared = AppStore._();
 
@@ -266,8 +267,42 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> forgetRemoteMatch(String code) async {
+    // If that match is the game in progress here, close it: its link would otherwise stay open.
+    final s = session, link = s?.match;
+    if (s != null && link != null && link.transport is RelayTransport && (link.transport as RelayTransport).code == code) {
+      session = null;
+      s.dispose();
+      unawaited(link.dispose());
+    }
     remoteMatches.removeWhere((m) => m['code'] == code);
     await _prefs.setString('remoteMatches', jsonEncode(remoteMatches));
+    await _prefs.remove('match:relay:$code');
     notifyListeners();
+  }
+
+  // Linked games' move logs, saved after every move (see LockstepMatch).
+
+  @override
+  Map<String, dynamic>? load(String key) {
+    final raw = _prefs.getString('match:$key');
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  void save(String key, Map<String, dynamic> log) {
+    _prefs.setString('match:$key', jsonEncode(log));
+    // Keep the logs of the 30 most recent games.
+    final keys = (_prefs.getStringList('matchLogs') ?? [])
+      ..remove(key)
+      ..insert(0, key);
+    for (final old in keys.skip(30)) {
+      _prefs.remove('match:$old');
+    }
+    _prefs.setStringList('matchLogs', keys.take(30).toList());
   }
 }

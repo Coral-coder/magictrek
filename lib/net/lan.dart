@@ -61,6 +61,19 @@ class TcpTransport implements Transport {
   }
 }
 
+/// The port a host listens on when it's free, so "type the host's address" usually needs no port.
+const lanGamePort = 47000;
+
+/// This device's IPv4 addresses on the local network, for telling a guest where to connect.
+Future<List<String>> localAddresses() async {
+  try {
+    final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
+    return [for (final i in interfaces) for (final a in i.addresses) a.address];
+  } catch (_) {
+    return const [];
+  }
+}
+
 class LanHost implements HostLink {
   ServerSocket? _server;
   RawDatagramSocket? _beacon;
@@ -73,7 +86,11 @@ class LanHost implements HostLink {
 
   @override
   Future<void> start({required String name, required String id}) async {
-    _server = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    try {
+      _server = await ServerSocket.bind(InternetAddress.anyIPv4, lanGamePort);
+    } on SocketException {
+      _server = await ServerSocket.bind(InternetAddress.anyIPv4, 0); // the usual port is taken
+    }
     _server!.listen((socket) {
       socket.setOption(SocketOption.tcpNoDelay, true);
       _connections.add(TcpTransport(socket));

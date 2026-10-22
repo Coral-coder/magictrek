@@ -33,6 +33,21 @@ void main() {
     expect(find.byType(CardGalleryScreen), findsOneWidget);
   });
 
+  testWidgets('a remote match can be removed from the list', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await AppStore.shared.rememberRemoteMatch(code: 'ZZTOP9', host: true, opponent: 'Worf');
+    await tester.pumpWidget(app(const RemoteLobbyScreen()));
+    await tester.pump();
+    final row = find.textContaining('ZZTOP9');
+    expect(row, findsOneWidget);
+    await tester.tap(find.byTooltip('Remove this match'));
+    await tester.pumpAndSettle();
+    expect(row, findsNothing);
+    expect(AppStore.shared.remoteMatches.where((m) => m['code'] == 'ZZTOP9'), isEmpty);
+  });
+
   testWidgets('gallery, decks and lobbies build', (tester) async {
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;

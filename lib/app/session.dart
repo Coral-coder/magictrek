@@ -38,6 +38,7 @@ class GameSession extends ChangeNotifier {
     _lastLogCount = game.state.log.length;
     _matchSub = match.events.listen((e) {
       if (e == 'action') _afterChange(remote: true);
+      if (e == 'rewind' || e == 'start') _followMatch();
       if (e == 'desync' || e == 'error') {
         lastError = match.error;
         notifyListeners();
@@ -57,6 +58,12 @@ class GameSession extends ChangeNotifier {
   Game game;
   final List<GameAction> actions = [];
   String? lastError;
+
+  /// Something the table should say once, such as the game going back a few moves.
+  String? notice;
+
+  /// Counts the times the game was replaced under the table (a rewind), so it can drop a half-made move.
+  int resets = 0;
   List<GameEvent> recentEvents = [];
   bool thinking = false;
   late PlayerID localSeat;
@@ -106,12 +113,30 @@ class GameSession extends ChangeNotifier {
         actions.add(action);
       }
       lastError = null;
+      notice = null;
       _afterChange();
     } catch (e) {
       lastError = '$e';
       Console.shared.play(Fx.deny);
       notifyListeners();
     }
+  }
+
+  /// The linked game went back to the last move both devices share (or switched to the other
+  /// device's copy): pick up its new state.
+  void _followMatch() {
+    final m = match!;
+    game = m.game!;
+    localSeat = m.localSeat;
+    playerNames
+      ..clear()
+      ..addAll([for (final p in game.state.players) p.name]);
+    _lastLogCount = state.log.length;
+    recentEvents = [];
+    notice = m.notice;
+    lastError = null;
+    resets++;
+    notifyListeners();
   }
 
   void _afterChange({bool remote = false}) {
@@ -222,7 +247,7 @@ class GameSession extends ChangeNotifier {
 
   String get saveJson => jsonEncode({'mode': mode.name, 'seed': seed, 'names': playerNames, 'decks': decks, 'actions': actions.map((a) => a.toJson()).toList()});
 
-  void concede() => perform(const ConcedeAction());
+  void concede() => perform(ConcedeAction(localSeat));
 
   @override
   void dispose() {

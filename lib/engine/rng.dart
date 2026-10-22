@@ -1,18 +1,28 @@
-/// SplitMix64 on 64-bit ints: every client replaying the same actions shuffles the same way.
-class SeededRng {
-  SeededRng(this.state);
-  int state;
+import 'package:fixnum/fixnum.dart';
 
-  int next() {
-    state = state + 0x9E3779B97F4A7C15; // wraps in 64-bit Dart ints
-    var z = state;
-    z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9;
-    z = (z ^ (z >>> 27)) * 0x94D049BB133111EB;
-    return z ^ (z >>> 31);
+/// SplitMix64: every client replaying the same actions shuffles the same way. The arithmetic is
+/// exact 64-bit (fixnum's Int64), so a phone and a browser produce identical sequences.
+class SeededRng {
+  SeededRng(int seed) : _state = Int64(seed);
+  Int64 _state;
+
+  static final _gamma = Int64.parseHex('9E3779B97F4A7C15');
+  static final _mix1 = Int64.parseHex('BF58476D1CE4E5B9');
+  static final _mix2 = Int64.parseHex('94D049BB133111EB');
+
+  /// The generator's position, as the same text on every platform (for the state digest).
+  String get state => _state.toString();
+
+  Int64 _next() {
+    _state = _state + _gamma; // wraps in 64 bits
+    var z = _state;
+    z = (z ^ z.shiftRightUnsigned(30)) * _mix1;
+    z = (z ^ z.shiftRightUnsigned(27)) * _mix2;
+    return z ^ z.shiftRightUnsigned(31);
   }
 
   /// A non-negative int below [max].
-  int nextInt(int max) => (next() & 0x7FFFFFFFFFFFFFFF) % max;
+  int nextInt(int max) => ((_next() & Int64.MAX_VALUE) % Int64(max)).toInt();
 
   void shuffle<T>(List<T> list) {
     for (var i = list.length - 1; i > 0; i--) {

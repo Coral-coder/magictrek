@@ -105,6 +105,7 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   Interaction interaction = const Idle();
+  int _resets = 0;
   ObjectID? selectedHandCard;
   PlayerID? lifeFlash;
   int lastEventCount = 0;
@@ -164,6 +165,11 @@ class _GameScreenState extends State<GameScreen> {
 
   void _onSession() {
     if (!mounted) return;
+    if (session!.resets != _resets) {
+      // The game went back under us: whatever was half chosen may no longer exist.
+      _resets = session!.resets;
+      interaction = const Idle();
+    }
     for (final e in session!.recentEvents) {
       if (e.kind == 'lifeChanged' && (e.amount ?? 0) < 0) {
         lifeFlash = e.player;
@@ -1252,7 +1258,7 @@ class _GameScreenState extends State<GameScreen> {
   Widget controlBar() {
     final s = session!;
     final hint = AppStore.shared.coachOn ? coachHint() : null;
-    final text = s.lastError ?? hint ?? (s.match?.status ?? '');
+    final text = s.lastError ?? s.notice ?? hint ?? (s.match?.status ?? '');
     return Container(
       key: _tourBar,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1265,12 +1271,16 @@ class _GameScreenState extends State<GameScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(s.lastError != null ? Icons.error_outline : (hint != null ? Icons.lightbulb_outline : Icons.circle), size: 16, color: s.lastError != null ? LCARS.alert : (hint != null ? LCARS.gold : (myTurn ? LCARS.orange : LCARS.skyBlue))),
+                  Icon(
+                    s.lastError != null ? Icons.error_outline : (s.notice != null ? Icons.history : (hint != null ? Icons.lightbulb_outline : Icons.circle)),
+                    size: 16,
+                    color: s.lastError != null ? LCARS.alert : (s.notice != null || hint != null ? LCARS.gold : (myTurn ? LCARS.orange : LCARS.skyBlue)),
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       text,
-                      style: LCARS.font(13, weight: FontWeight.w500, color: s.lastError != null ? LCARS.alert : (hint != null ? LCARS.ice : LCARS.gray)),
+                      style: LCARS.font(13, weight: FontWeight.w500, color: s.lastError != null ? LCARS.alert : (s.notice != null || hint != null ? LCARS.ice : LCARS.gray)),
                       maxLines: 3,
                     ),
                   ),

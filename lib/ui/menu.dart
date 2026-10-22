@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/store.dart';
@@ -46,9 +47,18 @@ class MainMenuScreen extends StatelessWidget {
             const SizedBox(height: 6),
             LcarsButton('Pass & Play', icon: Icons.people, color: LCARS.butterscotch, onPressed: () => Navigator.pushNamed(context, '/new', arguments: true)),
             const SizedBox(height: 6),
-            LcarsButton('Nearby: Wi‑Fi or Bluetooth', icon: Icons.bluetooth, color: LCARS.gold, onPressed: () => Navigator.pushNamed(context, '/local')),
-            const SizedBox(height: 6),
-            LcarsButton('Remote: Subspace Link', icon: Icons.public, color: LCARS.blue, onPressed: () => Navigator.pushNamed(context, '/remote')),
+            // A browser can't use Bluetooth or open direct connections, so nearby and IP play
+            // are in the phone apps; online play with a code works everywhere.
+            if (!kIsWeb) ...[
+              LcarsButton('Nearby: Wi‑Fi, Bluetooth or IP', icon: Icons.bluetooth, color: LCARS.gold, onPressed: () => Navigator.pushNamed(context, '/local')),
+              const SizedBox(height: 6),
+            ],
+            LcarsButton(kIsWeb ? 'Play online with a code' : 'Remote: Subspace Link', icon: Icons.public, color: LCARS.blue, onPressed: () => Navigator.pushNamed(context, '/remote')),
+            if (kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('Playing in the browser. Nearby Wi‑Fi, Bluetooth and join-by-IP play are in the Android and iPhone apps; online play with a code works with them too.', style: LCARS.small.copyWith(color: LCARS.gray)),
+              ),
             const LcarsHeader('Databanks', color: LCARS.lavender),
             LcarsButton('Card Database', icon: Icons.view_module, color: LCARS.lavender, onPressed: () => Navigator.pushNamed(context, '/gallery')),
             const SizedBox(height: 6),
