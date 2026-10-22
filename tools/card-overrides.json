@@ -1,5 +1,5 @@
 {
-  "_comment": "Images on mythicspoiler that Scryfall has no record for yet. 'base' copies rules from that Scryfall card (exact name) and the other keys override; otherwise the whole card is spelled out here, transcribed from the card face.",
+  "_comment": "Cards mythicspoiler shows that Scryfall doesn't list in these sets yet. 'base' copies rules (and, with useScryfallImage, the scan) from that Scryfall card; other keys override; a missing collector number gives the card the id <set>-<image stem>. Cards spelled out without 'base' are transcribed from the face.",
   "academyonthebay": {
     "base": "Minamo, School at Water's Edge",
     "name": "Academy on the Bay",
@@ -73,13 +73,15 @@
     "base": "Burst Lightning",
     "set": "trc",
     "collector_number": "",
-    "rarity": "uncommon"
+    "rarity": "uncommon",
+    "useScryfallImage": true
   },
   "solemnsimulacrum": {
     "base": "Solemn Simulacrum",
     "set": "trc",
     "collector_number": "",
-    "rarity": "rare"
+    "rarity": "rare",
+    "useScryfallImage": true
   },
   "dot7squad": {
     "base": "DOT-7 Repair Squad"

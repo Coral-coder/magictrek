@@ -1,10 +1,11 @@
 # Archives the iOS app and (optionally) uploads it to TestFlight. Installed by Dev_deploy_setup
 # (Actions → Set up app repo there); it's the MagicMaker / ePTT workflow made generic. It is driven
-# by markers in the subject (first line) of the commit message of a push to main:
+# by markers in the subject (first line) of the commit message of a push to any branch:
 #
 #   no marker   nothing happens
 #   *b          archive and sign only, as a check; nothing is uploaded
 #   *u          archive and upload to TestFlight, same version, build number + 1
+#   build       (the word, any case) same as *u; the Android release workflow reacts to it too
 #
 # To release a new version, tag the *u commit: `git tag v1.4.0` and push the tag with the
 # branch (`git push origin main v1.4.0`). That uploads 1.4.0 as build 1. Running the workflow
@@ -12,7 +13,8 @@
 # are optional overrides.
 #
 # The project is found on its own: the first *.xcodeproj within three folders of the repo root
-# (or an XcodeGen project.yml, which is generated first). The scheme defaults to the project's
+# (or an XcodeGen project.yml, which is generated first). A Flutter app (pubspec.yaml at the root)
+# gets the Flutter SDK installed and `flutter build ios` run first; its project is ios/Runner. The scheme defaults to the project's
 # name and the bundle ID to the scheme's PRODUCT_BUNDLE_IDENTIFIER. Override any of them with
 # repository variables (Settings → Secrets and variables → Actions → Variables):
 #   IOS_DIR, XCODE_PROJECT, XCODE_SCHEME, BUNDLE_ID, APP_NAME (App Store name), APP_SKU
@@ -26,7 +28,8 @@
 #
 # The current version and build are MARKETING_VERSION and CURRENT_PROJECT_VERSION in the
 # project; after an upload the workflow commits the numbers it used back to the branch (that
-# commit doesn't trigger workflows). The build number is also checked against App Store Connect,
+# commit doesn't trigger workflows). A Flutter app's version is pubspec.yaml's and its build
+# number is this workflow's run number, so nothing is written back. The build number is also checked against App Store Connect,
 # so a build uploaded by hand from Xcode never collides.
 #
 # Signing is automatic ("cloud signing") with the App Store Connect API key.
@@ -38,7 +41,7 @@ name: iOS TestFlight
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v[0-9]*"]
   workflow_dispatch:
     inputs:
@@ -74,6 +77,8 @@ jobs:
             build=true; upload=true
           else
             case "$message" in *'*u'*) build=true; upload=true ;; *'*b'*) build=true ;; esac
+            # "build" as a word in the subject ("Build: ...", "new build", "build it") uploads too.
+            if printf '%s' "$message" | grep -qiE '(^|[^[:alnum:]])build([^[:alnum:]]|$)'; then build=true; upload=true; fi
           fi
           # A tagged commit is handled by the tag's run, not the branch's, so it isn't built twice.
           if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$build" = true ]; then
@@ -196,6 +201,23 @@ jobs:
         if: hashFiles('scripts/fetch-libsignal-ffi.sh') != ''
         run: scripts/fetch-libsignal-ffi.sh
 
+      # A Flutter app: the Xcode project is ios/Runner and needs the Flutter SDK, pub packages and
+      # CocoaPods set up before xcodebuild can archive it.
+      - name: Set up Flutter
+        if: hashFiles('pubspec.yaml') != ''
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Prepare the Flutter iOS build
+        if: hashFiles('pubspec.yaml') != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign --build-name "${INPUT_VERSION:-$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)}" --build-number "$GITHUB_RUN_NUMBER"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+
       - name: Find the project, scheme and bundle ID
         env:
           XCODE_PROJECT: ${{ vars.XCODE_PROJECT }}
@@ -214,6 +236,9 @@ jobs:
             fi
           fi
           if [ -z "$project" ] || [ ! -d "$project" ]; then echo "::error::No Xcode project in $(pwd)"; exit 1; fi
+          # CocoaPods (Flutter plugins) means building the workspace, not the project.
+          workspace="${project%.xcodeproj}.xcworkspace"
+          if [ -d "$workspace" ]; then echo "WORKSPACE=$workspace" >> "$GITHUB_ENV"; echo "Using workspace $workspace"; fi
           schemes=$(xcodebuild -project "$project" -list -json | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["project"].get("schemes", [])))')
           scheme="$XCODE_SCHEME"
           if [ -z "$scheme" ]; then
@@ -229,7 +254,12 @@ jobs:
               | awk -v t="$scheme" '/^Build settings for action .* and target /{inside = ($NF == t":")} inside && /^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER = /{print $3; exit}')
           fi
           if [ -z "$bundle" ]; then echo "::error::Couldn't read the bundle ID; set the BUNDLE_ID variable"; exit 1; fi
-          name="${APP_NAME:-$scheme}"
+          name="$APP_NAME"
+          # A Flutter project's scheme is always "Runner"; the app's name is in its Info.plist.
+          if [ -z "$name" ] && [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then
+            name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' Runner/Info.plist 2>/dev/null || true)
+          fi
+          name="${name:-$scheme}"
           sku="${APP_SKU:-$(echo "$bundle" | tr '.' '-')}"
           echo "Project $project, scheme $scheme, bundle ID $bundle, app name $name"
           {
@@ -245,6 +275,11 @@ jobs:
           pbxproj="$PROJECT/project.pbxproj"
           current_version=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION = "?([^";]+)"?;/\1/p' "$pbxproj" | sort -V | tail -1)
           current_build=$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION = "?([0-9]+)"?;/\1/p' "$pbxproj" | sort -n | tail -1)
+          if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then
+            # Flutter keeps the version in pubspec.yaml ("version: 1.2.0+7").
+            current_version=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' "$GITHUB_WORKSPACE/pubspec.yaml")
+            current_build=$(sed -nE 's/^version: [0-9.]+\+([0-9]+).*/\1/p' "$GITHUB_WORKSPACE/pubspec.yaml")
+          fi
           current_version="${current_version:-1.0}"; current_build="${current_build:-0}"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
@@ -262,6 +297,9 @@ jobs:
             else
               build=1                        # new version: builds start over
             fi
+            # A Flutter app keeps nothing in the repo (see "Record the version and build"): the
+            # workflow's run number is the floor, which only ever grows.
+            if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ] && [ "$GITHUB_RUN_NUMBER" -gt "$build" ]; then build="$GITHUB_RUN_NUMBER"; fi
             # Never reuse a number App Store Connect already has (e.g. a build uploaded from Xcode).
             if asc_next=$(python3 "$ASC" next-build --bundle-id "$BUNDLE_ID" --version "$version"); then
               if [ "$asc_next" -gt "$build" ]; then build="$asc_next"; fi
@@ -334,8 +372,10 @@ jobs:
       - name: Archive
         run: |
           mkdir -p build
+          # A Flutter app builds its CocoaPods workspace; anything else the project itself.
+          if [ -n "$WORKSPACE" ]; then target=(-workspace "$WORKSPACE"); else target=(-project "$PROJECT"); fi
           archive() {
-            xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            xcodebuild "${target[@]}" -scheme "$SCHEME" -configuration Release \
               -destination 'generic/platform=iOS' -archivePath "build/$SCHEME.xcarchive" \
               -allowProvisioningUpdates \
               -authenticationKeyPath "$ASC_KEY_PATH" \
@@ -382,12 +422,23 @@ jobs:
             <key>uploadSymbols</key><true/>
           </dict></plist>
           PLIST
-          xcodebuild -exportArchive -archivePath "build/$SCHEME.xcarchive" \
-            -exportOptionsPlist build/ExportOptions.plist -exportPath build/upload \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          # App Store Connect's side of the export fails now and then before anything is sent
+          # ("Error Downloading App Information", "Communication with Apple failed"); that is
+          # worth a couple more tries, anything else is not.
+          set -o pipefail
+          ok=false
+          for attempt in 1 2 3; do
+            if xcodebuild -exportArchive -archivePath "build/$SCHEME.xcarchive" \
+                -exportOptionsPlist build/ExportOptions.plist -exportPath build/upload \
+                -allowProvisioningUpdates \
+                -authenticationKeyPath "$ASC_KEY_PATH" \
+                -authenticationKeyID "$ASC_KEY_ID" \
+                -authenticationKeyIssuerID "$ASC_ISSUER_ID" 2>&1 | tee build/export.log; then ok=true; break; fi
+            grep -qiE "Error Downloading App Information|Communication with Apple failed|timed out|network connection" build/export.log || break
+            echo "::warning::App Store Connect did not answer (attempt $attempt); trying again in 30 s"
+            sleep 30
+          done
+          [ "$ok" = true ]
           echo "Uploaded $VERSION ($BUILD_NUMBER). It appears in TestFlight after Apple finishes processing (usually 5 to 20 minutes)."
           echo "### TestFlight: uploaded $APP_NAME $VERSION ($BUILD_NUMBER)" >> "$GITHUB_STEP_SUMMARY"
 
@@ -404,11 +455,24 @@ jobs:
       - name: Record the version and build
         if: env.UPLOAD == 'true'
         run: |
+          # A Flutter app gets its number from the run and App Store Connect, so nothing is
+          # written back: a commit pushed by the workflow's token runs no CI and leaves the
+          # pull request's head unchecked until someone approves the run by hand.
+          if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then echo "Flutter app: nothing to record"; exit 0; fi
           # On the branch that was built; a tag records on main.
           branch="$GITHUB_REF_NAME"
           if [ "$GITHUB_REF_TYPE" != "branch" ]; then branch=main; fi
           git fetch origin "$branch"
           git checkout -B "$branch" "origin/$branch"
+          if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ]; then
+            sed -i '' -E "s/^version: .*/version: $VERSION+$BUILD_NUMBER/" "$GITHUB_WORKSPACE/pubspec.yaml"
+            git add -- "$GITHUB_WORKSPACE/pubspec.yaml"
+            if git diff --cached --quiet; then exit 0; fi
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "TestFlight: $VERSION ($BUILD_NUMBER)"
+            git push origin "$branch"
+            exit 0
+          fi
           if [ -z "$(git ls-files -- "$PROJECT/project.pbxproj" project.yml)" ]; then echo "No tracked project file to record the version in"; exit 0; fi
           if [ -f "$PROJECT/project.pbxproj" ]; then
             sed -i '' -E "s/^([[:space:]]*MARKETING_VERSION = )[^;]*;/\1$VERSION;/" "$PROJECT/project.pbxproj"
