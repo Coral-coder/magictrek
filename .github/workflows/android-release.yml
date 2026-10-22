@@ -149,7 +149,17 @@ jobs:
         run: |
           name=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)
           case "$TAG" in v*) name="${TAG#v}" ;; esac
-          flutter build apk --release --build-name "$name" --build-number "$GITHUB_RUN_NUMBER"
+          # The NDK the SDK fetches on first use sometimes arrives corrupt ("Error reading Zip
+          # content from a SeekableByteChannel"); drop the half-installed copy and go again.
+          set -o pipefail
+          ok=false
+          for attempt in 1 2 3; do
+            if flutter build apk --release --build-name "$name" --build-number "$GITHUB_RUN_NUMBER" 2>&1 | tee "$RUNNER_TEMP/apk.log"; then ok=true; break; fi
+            grep -q "Error reading Zip content\|preparing SDK package NDK" "$RUNNER_TEMP/apk.log" || break
+            echo "::warning::The NDK download was corrupt; retrying (attempt $attempt failed)"
+            rm -rf "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/ndk/28*
+          done
+          [ "$ok" = true ]
           cp build/app/outputs/flutter-apk/app-release.apk MagicTrek.apk
           echo "VERSION_NAME=$name" >> "$GITHUB_ENV"
       - name: Describe the release
