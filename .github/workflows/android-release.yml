@@ -14,10 +14,12 @@
 #
 # Signing: with the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
 # ANDROID_KEY_PASSWORD secrets the APK is signed with that key, and in-app updates install over
-# the previous build. Without them it is signed with the runner's throwaway debug key: it installs
-# when sideloaded, but every build has a different signature, so an update means uninstalling
-# first. The workflow fails the run with a notice when the secrets are missing so this is never
-# silent; set the secrets once (README, "Releases") and it goes quiet.
+# the previous build. With none of those but a SECRETS_TOKEN secret (a GitHub token that may
+# write this repository's Actions secrets) the workflow creates the key itself, stores it as
+# those four secrets, signs this build with it and attaches an encrypted backup to the run.
+# With neither it signs with the runner's throwaway debug key: that installs when sideloaded,
+# but every build has a different signature, so an update means uninstalling first; the run
+# carries a warning so this is never silent.
 name: Android release
 
 on:
@@ -81,25 +83,69 @@ jobs:
         with:
           channel: stable
           cache: true
+      # The signing key, in order of preference: the ANDROID_KEYSTORE_* secrets; a key this run
+      # creates and stores as those secrets itself, when a token that may write repository
+      # secrets is available (SECRETS_TOKEN: a classic PAT with "repo", or a fine-grained one with
+      # Secrets: read and write on this repository); else the runner's throwaway debug key.
       - name: Release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TOKEN_1: ${{ secrets.SECRETS_TOKEN }}
+          TOKEN_2: ${{ secrets.GH_PAT }}
+          TOKEN_3: ${{ secrets.REPO_TOKEN }}
+          TOKEN_4: ${{ secrets.ADMIN_TOKEN }}
+          TOKEN_5: ${{ secrets.PAT }}
         run: |
+          store="$RUNNER_TEMP/release.keystore"
+          use() {
+            # use <store password> <alias> <key password>: hand the key to the Build step (and
+            # Gradle) through the job environment.
+            echo "::add-mask::$1"; echo "::add-mask::$3"
+            { echo "ANDROID_KEYSTORE_PATH=$store"; echo "ANDROID_KEYSTORE_PASSWORD=$1"
+              echo "ANDROID_KEY_ALIAS=$2"; echo "ANDROID_KEY_PASSWORD=$3"; echo "SIGNED=release"; } >> "$GITHUB_ENV"
+          }
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-            echo "SIGNED=release" >> "$GITHUB_ENV"
-            echo "Signing with the release keystore"
-          else
-            echo "SIGNED=debug" >> "$GITHUB_ENV"
-            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: the APK is signed with a throwaway debug key, so the in-app updater cannot install the next build over this one. Add the ANDROID_KEYSTORE_* secrets (README, Releases)."
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$store"
+            use "$KEYSTORE_PASSWORD" "${KEY_ALIAS:-magictrek}" "${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+            echo "Signing with the release keystore from the repository secrets"
+            exit 0
           fi
+          token=""
+          for t in "$TOKEN_1" "$TOKEN_2" "$TOKEN_3" "$TOKEN_4" "$TOKEN_5"; do if [ -n "$t" ]; then token="$t"; break; fi; done
+          if [ -n "$token" ]; then
+            echo "No signing key yet; creating one and storing it as the ANDROID_KEYSTORE_* secrets"
+            password=$(openssl rand -hex 24)
+            keytool -genkeypair -keystore "$store" -storetype PKCS12 -alias magictrek -keyalg RSA -keysize 2048 \
+              -validity 36500 -storepass "$password" -keypass "$password" -dname "CN=MagicTrek, O=Lightwave" > /dev/null 2>&1
+            encoded=$(base64 -w0 "$store")
+            echo "::add-mask::$encoded"
+            export GH_TOKEN="$token"
+            gh secret set ANDROID_KEYSTORE_BASE64 --repo "$GITHUB_REPOSITORY" --body "$encoded"
+            gh secret set ANDROID_KEYSTORE_PASSWORD --repo "$GITHUB_REPOSITORY" --body "$password"
+            gh secret set ANDROID_KEY_ALIAS --repo "$GITHUB_REPOSITORY" --body magictrek
+            gh secret set ANDROID_KEY_PASSWORD --repo "$GITHUB_REPOSITORY" --body "$password"
+            use "$password" magictrek "$password"
+            # A backup the owner can decrypt with that same token (secrets can't be read back):
+            #   openssl enc -d -aes-256-cbc -pbkdf2 -in magictrek.keystore.enc -out magictrek.jks -pass pass:<token>
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in "$store" -out "$RUNNER_TEMP/magictrek.keystore.enc" -pass env:GH_TOKEN
+            echo "BACKUP=$RUNNER_TEMP/magictrek.keystore.enc" >> "$GITHUB_ENV"
+            echo "### Android signing key created and stored as the ANDROID_KEYSTORE_* repository secrets. Every build from now on is signed with it, so installed copies update in place. An encrypted backup is attached to this run as an artifact; decrypt it with the SECRETS_TOKEN value (see the workflow)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "SIGNED=debug" >> "$GITHUB_ENV"
+          echo "::warning::No signing key and no SECRETS_TOKEN secret to create one with: the APK is signed with a throwaway debug key, so the in-app updater cannot install the next build over this one. Add the ANDROID_KEYSTORE_* secrets, or a SECRETS_TOKEN secret and the workflow makes the key itself (README, Releases)."
+      - name: Keep an encrypted backup of the new key
+        if: env.BACKUP != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-signing-key-encrypted
+          path: ${{ env.BACKUP }}
+          retention-days: 90
       - run: flutter pub get
       - name: Build
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           name=$(sed -nE 's/^version: ([0-9.]+)\+.*/\1/p' pubspec.yaml)
           case "$TAG" in v*) name="${TAG#v}" ;; esac

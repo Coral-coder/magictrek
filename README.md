@@ -69,11 +69,16 @@ push it on any branch, or push a tag like `v1.2.0`: CI then ships both platforms
   downloads the newest build, so one QR code of it stays valid forever. Installed copies read
   `update.json` on launch and offer the newer build in-app (Settings also has *Check for
   updates*); the download opens Android's installer and the app updates in place.
-  That in-place update needs every build signed with the same key: add the repository secrets
-  `ANDROID_KEYSTORE_BASE64` (the `.jks` file, base64), `ANDROID_KEYSTORE_PASSWORD`,
-  `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` once. Make a key with
+  That in-place update needs every build signed with the same key. The easiest way: add one
+  repository secret, `SECRETS_TOKEN`, holding a GitHub token that may write this repository's
+  Actions secrets (a classic token with `repo`, or a fine-grained one with *Secrets: read and
+  write* on the repo). The next build creates a keystore, stores it as `ANDROID_KEYSTORE_BASE64`,
+  `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`, signs with it,
+  and attaches an encrypted backup to the run (decrypt with
+  `openssl enc -d -aes-256-cbc -pbkdf2 -in magictrek.keystore.enc -out magictrek.jks -pass pass:<the token>`).
+  Or set those four secrets yourself from a key made with
   `keytool -genkeypair -keystore magictrek.jks -storetype PKCS12 -alias magictrek -keyalg RSA -keysize 2048 -validity 36500`.
-  Without the secrets the APK is signed with the runner's throwaway debug key: it installs, but
+  Without any of this the APK is signed with the runner's throwaway debug key: it installs, but
   the next build cannot update over it (the app says so and asks to uninstall first).
 - **iOS**: `.github/workflows/ios-testflight.yml` archives `ios/Runner` and uploads to TestFlight
   on the same commits (`*b` archives without uploading; the workflow can also be run by hand).
