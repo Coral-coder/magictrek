@@ -89,9 +89,11 @@ class FreeCastPurpose extends Purpose {
 }
 
 class ActivatePurpose extends Purpose {
-  const ActivatePurpose(this.object, this.index);
+  const ActivatePurpose(this.object, this.index, {this.sacrifice, this.discard});
   final ObjectID object;
   final int index;
+  /// What the player chose to pay the cost with, before choosing targets.
+  final ObjectID? sacrifice, discard;
 }
 
 /// The table. Opponent on top, you below, hand at the bottom, LCARS controls in the middle.
@@ -262,25 +264,45 @@ class _GameScreenState extends State<GameScreen> {
     final cyc = parsed.cycling;
     if (cyc != null && canCycle(id)) items.add(_sheetButton('${cyc.landType == null ? 'Cycling' : 'Landcycling'} ${cyc.cost}', () => perform(CycleAction(id))));
     for (final (i, a) in zoneAbilities(id)) {
-      items.add(_sheetButton('${costText(a.cost)}: ${game.describeEffects(a.effects)}', () => beginActivate(id, i, a.cost, a.effects), color: LCARS.blue));
+      items.add(_sheetButton(abilityLabel(id, a), () => beginActivate(id, i, a.cost, a.effects), color: LCARS.blue));
     }
     return items;
   }
 
-  Widget _sheetButton(String label, VoidCallback onTap, {Color color = LCARS.orange, bool enabled = true}) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: LcarsButton(
-      label,
-      color: color,
-      height: 48,
-      onPressed: enabled
-          ? () {
-              Navigator.pop(context);
-              onTap();
-            }
-          : null,
-    ),
-  );
+  Widget _sheetButton(String label, VoidCallback onTap, {Color color = LCARS.orange, bool enabled = true}) {
+    void tap() {
+      Navigator.pop(context);
+      onTap();
+    }
+
+    // Abilities are shown in their printed words: long ones wrap instead of shrinking.
+    if (label.length > 34) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Opacity(
+          opacity: enabled ? 1 : 0.4,
+          child: Material(
+            color: color,
+            borderRadius: BorderRadius.circular(18),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: enabled ? tap : null,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                alignment: Alignment.centerLeft,
+                child: Text(label, style: LCARS.font(15, weight: FontWeight.w600, color: LCARS.black).copyWith(letterSpacing: 0.2, height: 1.25)),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: LcarsButton(label, color: color, height: 48, onPressed: enabled ? tap : null),
+    );
+  }
 
   /// Pick between `min` and `max` items: card faces (returned as object ids) or text labels
   /// (returned as indices).
@@ -324,7 +346,7 @@ class _GameScreenState extends State<GameScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: chosen.contains(i) ? LCARS.gold : Colors.transparent, width: 3),
                                 ),
-                                child: CardFace(card: game.card(cards[i]), width: 130),
+                                child: CardFace(card: game.card(cards[i]), token: state.objects[cards[i]]?.token, width: 130),
                               ),
                             ),
                         ],
@@ -504,7 +526,7 @@ class _GameScreenState extends State<GameScreen> {
       if (a.effects.length == 1 && a.effects[0] is AddMana) continue;
       final cost = a.cost;
       final usable = game.activationProblem(id, i, me) == null;
-      items.add(_sheetButton('${costText(cost)}: ${game.describeEffects(a.effects)}', () => beginActivate(id, i, cost, a.effects), enabled: usable));
+      items.add(_sheetButton(abilityLabel(id, a), () => beginActivate(id, i, cost, a.effects), enabled: usable));
     }
     if (c.isSpacecraft && parsed.has(KeywordKind.station) && state.phase.isMain) {
       items.add(_sheetButton('Station (tap a creature)', () => setState(() => interaction = Stationing(id)), color: LCARS.blue));
@@ -519,12 +541,30 @@ class _GameScreenState extends State<GameScreen> {
     return items;
   }
 
+  /// An ability's button label: its printed wording when known, else a summary.
+  String abilityLabel(ObjectID id, Activated a) {
+    if (a.text.isNotEmpty) return a.text.replaceAll('~', game.name(id));
+    return '${costText(a.cost)}: ${game.describeEffects(a.effects)}';
+  }
+
   String costText(ActivationCost cost) {
     final parts = <String>[];
     if (!cost.mana.isFree) parts.add(cost.mana.toString());
     if (cost.tap) parts.add('Tap');
     if (cost.sacrificeSelf) parts.add('Sacrifice');
-    if (cost.sacrifice != null) parts.add('Sacrifice a permanent');
+    final sac = cost.sacrifice;
+    if (sac != null) {
+      final what = sac.subtype ??
+          switch (sac.kind) {
+            FilterKind.creature => 'creature',
+            FilterKind.artifact => 'artifact',
+            FilterKind.land => 'land',
+            FilterKind.artifactOrCreature => 'artifact or creature',
+            FilterKind.nonlandPermanent => 'nonland permanent',
+            _ => 'permanent',
+          };
+      parts.add('Sacrifice ${sac.other ? 'another' : (RegExp('^[aeiouAEIOU]').hasMatch(what) ? 'an' : 'a')} $what');
+    }
     if (cost.payLife > 0) parts.add('Pay ${cost.payLife} life');
     if (cost.discard > 0) parts.add('Discard');
     if (cost.tapOthers > 0) parts.add('Tap ${cost.tapOthers} untapped ${cost.tapOthersFilter?.subtype != null ? '${cost.tapOthersFilter!.subtype}s' : 'artifacts/creatures'}');
@@ -540,29 +580,44 @@ class _GameScreenState extends State<GameScreen> {
     return parts.isEmpty ? 'Free' : parts.join(', ');
   }
 
-  ObjectID? _cheapestMatching(Filter f, ObjectID source) {
-    final candidates = state.permanentsOf(me).where((o) => game.matches(f, o.id, me, source)).map((o) => o.id).toList();
-    if (candidates.isEmpty) return null;
-    candidates.sort((a, b) => Bot.value(a, game) - Bot.value(b, game));
-    return candidates.first;
-  }
-
-  void beginActivate(ObjectID id, int index, ActivationCost cost, List<Effect> effects) {
-    ObjectID? sacrifice;
+  /// Pays an ability's choices one at a time: what to sacrifice and what to discard (asked when
+  /// there is more than one option), then its targets.
+  void beginActivate(ObjectID id, int index, ActivationCost cost, List<Effect> effects, {ObjectID? sacrifice, ObjectID? discard}) {
     final f = cost.sacrifice;
-    if (f != null) {
-      sacrifice = _cheapestMatching(f, id);
-      if (sacrifice == null) {
+    if (f != null && sacrifice == null) {
+      final candidates = state.permanentsOf(me).where((o) => game.matches(f, o.id, me, id)).map((o) => o.id).toList();
+      if (candidates.isEmpty) {
         setState(() => session!.lastError = 'Nothing to sacrifice');
         return;
       }
+      if (candidates.length > 1) {
+        candidates.sort((a, b) => Bot.value(a, game) - Bot.value(b, game));
+        showPickSheet('Sacrifice which?', cards: candidates, min: 1, max: 1, onDone: (picks) {
+          if (picks.isNotEmpty) beginActivate(id, index, cost, effects, sacrifice: picks.first, discard: discard);
+        });
+        return;
+      }
+      sacrifice = candidates.first;
     }
-    final discard = cost.discard > 0 ? state.players[me].hand.firstOrNull : null;
+    if (cost.discard > 0 && discard == null) {
+      final hand = state.players[me].hand.where((h) => h != id).toList();
+      if (hand.isEmpty) {
+        setState(() => session!.lastError = 'No card to discard');
+        return;
+      }
+      if (hand.length > 1) {
+        showPickSheet('Discard which card?', cards: hand, min: 1, max: 1, onDone: (picks) {
+          if (picks.isNotEmpty) beginActivate(id, index, cost, effects, sacrifice: sacrifice, discard: picks.first);
+        });
+        return;
+      }
+      discard = hand.first;
+    }
     final reqs = game.targetRequirementsIn(effects).where((r) => game.legalTargets(r.filter, me, id).isNotEmpty).toList();
     if (reqs.isEmpty) {
       perform(ActivateAbilityAction(id, index, sacrifice: sacrifice, discard: discard));
     } else {
-      setState(() => interaction = Targeting(requirements: reqs, chosen: const [], purpose: ActivatePurpose(id, index)));
+      setState(() => interaction = Targeting(requirements: reqs, chosen: const [], purpose: ActivatePurpose(id, index, sacrifice: sacrifice, discard: discard)));
     }
   }
 
@@ -575,11 +630,7 @@ class _GameScreenState extends State<GameScreen> {
       case FreeCastPurpose p:
         perform(RespondAction(FreeCastResponse(cast: true, mode: p.mode, targets: t.chosen)));
       case ActivatePurpose p:
-        ObjectID? sacrifice;
-        final obj = state.objects[p.object];
-        final a = obj == null ? null : game.abilitiesIn(obj).elementAtOrNull(p.index);
-        if (a is Activated && a.cost.sacrifice != null) sacrifice = _cheapestMatching(a.cost.sacrifice!, p.object);
-        perform(ActivateAbilityAction(p.object, p.index, targets: t.chosen, sacrifice: sacrifice));
+        perform(ActivateAbilityAction(p.object, p.index, targets: t.chosen, sacrifice: p.sacrifice, discard: p.discard));
     }
     setState(() {
       interaction = const Idle();

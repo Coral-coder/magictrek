@@ -220,7 +220,7 @@ class _Parser {
         }
         final (fx, bad) = effects(effectText);
         if (bad.isEmpty && fx.isNotEmpty) {
-          abilities.add(Activated(cost, fx, sorcerySpeed: sorcery));
+          abilities.add(Activated(cost, fx, sorcerySpeed: sorcery, text: body.trim()));
         } else {
           unsupported.add(line);
         }

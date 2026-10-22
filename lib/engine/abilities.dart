@@ -1514,10 +1514,13 @@ class Triggered extends Ability {
 }
 
 class Activated extends Ability {
-  const Activated(this.cost, this.effects, {this.sorcerySpeed = false});
+  const Activated(this.cost, this.effects, {this.sorcerySpeed = false, this.text = ''});
   final ActivationCost cost;
   final List<Effect> effects;
   final bool sorcerySpeed;
+
+  /// The ability as printed ("~" stands for the card's name), for buttons. Not part of equality.
+  final String text;
   @override
   List<Object?> get props => [cost, effects, sorcerySpeed];
   @override
