@@ -31,37 +31,52 @@ class GameObject {
   bool assimilated = false;
   PlayerID? attacking;
   ObjectID? blocking;
+
   /// Arrived on the battlefield by being cast ("if you cast it").
   bool wasCast = false;
+
   /// Nyota Uhura: the number chosen as it entered.
   int? chosenNumber;
+
   /// Entered as a copy of this card (Dominion Saboteur); the printed card is `cardID`.
   String? copiedCardID;
+
   /// A copy "except it isn't legendary".
   bool nonLegendary = false;
+
   /// May be played from exile by `playableBy` until the end of turn `playableUntilTurn`
   /// (Reckless Impulse, Silicate Surveyor...), for `extraCost` more (Zero).
   PlayerID? playableBy;
   int playableUntilTurn = 0;
   int extraCost = 0;
+
   /// Effects lasting until the start of a player's next turn (V'Ger's -1/-0).
   List<LastingEffect> lasting = [];
+
   /// Control returns to this player at end of turn (gain control until end of turn).
   PlayerID? controlRevertsTo;
+
   /// Phased out: treated as though it doesn't exist.
   bool phasedOut = false;
+
   /// "If that creature would die this turn, exile it instead."
   bool exileIfDiesThisTurn = false;
+
   /// Q: an exiled card that can be copied by exiling a card from hand.
   bool qCopyable = false;
+
   /// Charge counters were put on it this turn (Enterprise-D's "first time each turn").
   bool chargedThisTurn = false;
+
   /// Seven of Nine: base power and toughness set by an ability.
   int? basePowerOverride, baseToughnessOverride;
+
   /// Kobayashi Maru: modes already chosen.
   Set<int> usedModes = {};
+
   /// Exiled "until ~ leaves the battlefield".
   List<ObjectID> exiledUntilLeaves = [];
+
   /// Temporary creature types ("becomes a Doctor").
   List<String> addedTypes = [];
 
@@ -148,12 +163,16 @@ class PlayerState {
   int cardsDrawnThisTurn = 0;
   int dilemmasThisTurn = 0;
   int opponentsAttackedThisTurn = 0;
+
   /// The Holodeck's once-per-turn play from the graveyard is used.
   bool usedGraveyardPlayThisTurn = false;
+
   /// Brad Boimler: counters put on your permanents get one more until end of turn.
   bool extraCounterThisTurn = false;
+
   /// Peace in Our Time: took the offered card, so can't attack this turn.
   bool cantAttackThisTurn = false;
+
   /// Mana added by abilities like Starfleet Academy's, by color symbol ('C' colorless), spent
   /// before tapping sources and emptied as steps end.
   Map<String, int> manaPool = {};
@@ -411,7 +430,19 @@ class DiscoverResponse extends DecisionResponse {
 
 /// The continuation of an interrupted effect sequence.
 class Resume {
-  Resume({required this.source, required this.controller, required this.effects, required this.context, required this.kind, this.modes, this.optionalEffects, this.sacrificeFilter, this.subject, this.effect, List<ObjectID>? cards}) : cards = cards ?? [];
+  Resume({
+    required this.source,
+    required this.controller,
+    required this.effects,
+    required this.context,
+    required this.kind,
+    this.modes,
+    this.optionalEffects,
+    this.sacrificeFilter,
+    this.subject,
+    this.effect,
+    List<ObjectID>? cards,
+  }) : cards = cards ?? [];
   ObjectID? source;
   PlayerID controller;
   List<Effect> effects;
@@ -423,12 +454,33 @@ class Resume {
 
   /// The object a decision is about (the spell a pay-or-counter decision may counter).
   ObjectID? subject;
+
   /// The effect waiting on this choice, and the cards it is choosing among.
   Effect? effect;
   List<ObjectID> cards;
 }
 
-enum ResumeKind { targets, mode, optional, surveil, scry, explore, discover, sacrifice, none, cleanup, blockers, mulligan, payOrCounter, chooseNumber, chooseCards, topOrBottom, chooseColor, peace, chooseModes }
+enum ResumeKind {
+  targets,
+  mode,
+  optional,
+  surveil,
+  scry,
+  explore,
+  discover,
+  sacrifice,
+  none,
+  cleanup,
+  blockers,
+  mulligan,
+  payOrCounter,
+  chooseNumber,
+  chooseCards,
+  topOrBottom,
+  chooseColor,
+  peace,
+  chooseModes,
+}
 
 /// A spell waiting to resolve. Abilities resolve at once; only spells use the stack, which is
 /// what lets the other player respond to them (and counter them).
@@ -466,6 +518,7 @@ class DelayedTrigger {
   final PlayerID controller;
   final ObjectID source;
   final List<Effect> effects;
+
   /// Only during this turn.
   final int turn;
   String digest() => '${event.name}:$object:$controller:$source:${effects.length}:$turn';
@@ -497,14 +550,19 @@ class EffectContext {
 
   /// The value chosen for X when the spell was cast.
   int x = 0;
+
   /// A number carried by the triggering event (combat damage dealt...).
   int eventAmount = 0;
+
   /// Objects an effect affected, for "each of those creatures" and "this way" counts.
   List<ObjectID> affected = [];
+
   /// How many things the last counting effect did "this way".
   int counted = 0;
+
   /// Creature types of what was sacrificed to pay for this ("If you sacrificed a Klingon").
   Set<String> sacrificedSubtypes = {};
+
   /// Which time this ability has resolved this turn (Captain Burnham).
   int resolution = 0;
   ObjectID? triggeringObject;
@@ -608,6 +666,7 @@ class GameState {
   }
 
   GameObject? object(ObjectID id) => objects[id];
+
   /// The permanents a player controls, leaving out phased-out ones (which are treated as though
   /// they don't exist).
   List<GameObject> permanentsOf(PlayerID p) => [

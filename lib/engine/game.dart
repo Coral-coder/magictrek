@@ -586,7 +586,20 @@ class Game {
       final payment = Bot.discardChoice(this, p, 1).first;
       move(payment, Zone.exile);
       log(GameEvent('exiled', object: payment));
-      final copy = newObject(cardID: o.cardID, owner: p, zone: Zone.hand, token: TokenSpec(name: card.name, power: card.basePower, toughness: card.baseToughness, isArtifact: card.isArtifact, isCreature: card.isCreature, isLand: card.isLand, isLegendary: card.isLegendary));
+      final copy = newObject(
+        cardID: o.cardID,
+        owner: p,
+        zone: Zone.hand,
+        token: TokenSpec(
+          name: card.name,
+          power: card.basePower,
+          toughness: card.baseToughness,
+          isArtifact: card.isArtifact,
+          isCreature: card.isCreature,
+          isLand: card.isLand,
+          isLegendary: card.isLegendary,
+        ),
+      );
       hand.add(copy);
       log(GameEvent('copied', object: id, other: copy, player: p));
       _cast(copy, targets: targets, kicked: kicked, mode: mode, x: x);
@@ -728,6 +741,7 @@ class Game {
       }
       search(i + 1, used);
     }
+
     search(0, {});
     return best;
   }
@@ -908,19 +922,11 @@ class Game {
 
   void _activate(ObjectID id, int index, {required List<ObjectID> targets, ObjectID? sacrifice, ObjectID? discard}) {
     final p = actor;
-    final o = state.objects[id];
-    final parsed = o == null ? null : parsedOf(o);
-    if (o == null || o.controller != p || o.zone != Zone.battlefield || parsed == null || index >= parsed.abilities.length) throw GameError('No such ability');
-    final ability = parsed.abilities[index];
-    if (ability is! Activated) throw GameError('No such ability');
+    final problem = activationProblem(id, index, p);
+    if (problem != null) throw GameError(problem);
+    final o = state.objects[id]!;
+    final ability = abilitiesIn(o)[index] as Activated;
     final cost = ability.cost;
-    if (ability.sorcerySpeed && (!state.phase.isMain || state.priority != null || state.stack.isNotEmpty || state.activePlayer != p)) throw GameError('Only as a sorcery');
-    if (cost.oncePerTurn && o.activatedThisTurn.contains(index)) throw GameError('Already used this turn');
-    if (cost.tap) {
-      if (o.tapped) throw GameError('Already tapped');
-      if (characteristics(id).isCreature && hasSummoningSickness(o)) throw GameError('Summoning sick');
-    }
-    if (cost.payLife > 0 && state.players[p].life <= cost.payLife) throw GameError('Not enough life');
     ObjectID? sacID;
     final f = cost.sacrifice;
     if (f != null) {
@@ -929,7 +935,7 @@ class Game {
     }
     if (cost.discard > 0) {
       final d = discard == null ? null : state.objects[discard];
-      if (d == null || d.zone != Zone.hand || d.owner != p) throw GameError('Choose a card to discard');
+      if (d == null || d.zone != Zone.hand || d.owner != p || discard == id) throw GameError('Choose a card to discard');
     }
     _validateTargets(targets, targetRequirementsIn(ability.effects), p, id);
     final mana = cost.mana.copy();
@@ -947,20 +953,47 @@ class Game {
       log(GameEvent('tapped', object: id));
       fireTriggers(SimpleTrigger.becomesTapped, id);
     }
+    for (final t in tapOthersChoice(cost, p, id)!) {
+      state.objects[t]!.tapped = true;
+      log(GameEvent('tapped', object: t));
+      fireTriggers(SimpleTrigger.becomesTapped, t);
+    }
+    for (final (holder, kind) in removeCountersChoice(cost, p)!) {
+      final h = state.objects[holder]!;
+      h.counters[kind] = (h.counters[kind] ?? 1) - 1;
+      if (h.counters[kind]! <= 0) h.counters.remove(kind);
+    }
+    if (cost.removeCounters > 0) log(GameEvent('countersRemoved', player: p, amount: cost.removeCounters));
     if (cost.payLife > 0) changeLife(p, -cost.payLife);
     if (discard != null && cost.discard > 0) {
       move(discard, Zone.graveyard);
       log(GameEvent('discarded', player: p, object: discard));
     }
+    final context = EffectContext()..targets = List.of(targets);
     if (sacID != null) {
+      context.sacrificedSubtypes = Set.of(characteristics(sacID).subtypes);
       dies(sacID);
     }
     if (cost.sacrificeSelf) {
+      context.eventAmount = o.chargeCounters;
       dies(id);
+    }
+    switch (cost.zone) {
+      case AbilityZone.battlefield:
+        break;
+      case AbilityZone.hand:
+        move(id, Zone.graveyard);
+        log(GameEvent('discarded', player: p, object: id));
+      case AbilityZone.graveyard:
+        if (cost.exileSelf) {
+          move(id, Zone.exile);
+          log(GameEvent('exiled', object: id));
+        } else if (cost.bottomSelf) {
+          move(id, Zone.library, toBottom: true);
+        }
     }
     o.activatedThisTurn.add(index);
     log(GameEvent('activated', object: id, text: name(id)));
-    final context = EffectContext()..targets = List.of(targets);
     resolve(ability.effects, source: id, controller: p, context: context);
     _runContinuations();
   }
@@ -1122,7 +1155,17 @@ class Game {
       return false;
     }
     final c = characteristics(id);
-    final info = DeathInfo(id: id, controller: o.controller, owner: o.owner, isCreature: c.isCreature, isArtifact: c.isArtifact, isToken: o.isToken, subtypes: Set.of(c.subtypes), triggers: triggersOf(id), wasCreatureWithCounters: o.counters.isNotEmpty);
+    final info = DeathInfo(
+      id: id,
+      controller: o.controller,
+      owner: o.owner,
+      isCreature: c.isCreature,
+      isArtifact: c.isArtifact,
+      isToken: o.isToken,
+      subtypes: Set.of(c.subtypes),
+      triggers: triggersOf(id),
+      wasCreatureWithCounters: o.counters.isNotEmpty,
+    );
     move(id, Zone.graveyard);
     log(GameEvent(event == 'sacrificed' ? 'died' : event, object: id));
     fireDies(id, info: info);
@@ -1131,9 +1174,30 @@ class Game {
 
   void fireDies(ObjectID id, {DeathInfo? info}) {
     final o = state.objects[id];
-    final d = info ?? (o == null ? null : DeathInfo(id: id, controller: o.controller, owner: o.owner, isCreature: cardOf(o)?.isCreature ?? false, isArtifact: cardOf(o)?.isArtifact ?? false, isToken: o.isToken, subtypes: {...?cardOf(o)?.subtypes}, triggers: const [], wasCreatureWithCounters: false));
+    final d =
+        info ??
+        (o == null
+            ? null
+            : DeathInfo(
+                id: id,
+                controller: o.controller,
+                owner: o.owner,
+                isCreature: cardOf(o)?.isCreature ?? false,
+                isArtifact: cardOf(o)?.isArtifact ?? false,
+                isToken: o.isToken,
+                subtypes: {...?cardOf(o)?.subtypes},
+                triggers: const [],
+                wasCreatureWithCounters: false,
+              ));
     if (d == null) return;
-    final own = d.triggers.isNotEmpty ? d.triggers : (o == null ? const <(Triggered, String)>[] : [for (final (i, a) in (parsedOf(o)?.abilities ?? const <Ability>[]).indexed) if (a is Triggered) (a, '$id:$i')]);
+    final own = d.triggers.isNotEmpty
+        ? d.triggers
+        : (o == null
+              ? const <(Triggered, String)>[]
+              : [
+                  for (final (i, a) in (parsedOf(o)?.abilities ?? const <Ability>[]).indexed)
+                    if (a is Triggered) (a, '$id:$i'),
+                ]);
     for (final (t, key) in own) {
       if (t.event == SimpleTrigger.dies || t.event == SimpleTrigger.leaves) {
         if (state.objects[id] != null) fireTrigger(t, key, source: id, touched: id, leftBattlefield: true);
@@ -1491,7 +1555,17 @@ extension<T> on List<T> {
 /// What a permanent was as it died, for "whenever another creature dies" (tokens cease to exist
 /// as they leave the battlefield, so this is all that's left of them).
 class DeathInfo {
-  DeathInfo({required this.id, required this.controller, required this.owner, required this.isCreature, required this.isArtifact, required this.isToken, required this.subtypes, required this.triggers, required this.wasCreatureWithCounters});
+  DeathInfo({
+    required this.id,
+    required this.controller,
+    required this.owner,
+    required this.isCreature,
+    required this.isArtifact,
+    required this.isToken,
+    required this.subtypes,
+    required this.triggers,
+    required this.wasCreatureWithCounters,
+  });
   final ObjectID id;
   final PlayerID controller, owner;
   final bool isCreature, isArtifact, isToken, wasCreatureWithCounters;

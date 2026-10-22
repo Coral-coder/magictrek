@@ -337,7 +337,17 @@ class CardDatabase {
     final key = '${t.name}|${t.isLand}|${t.isCreature}|${t.isArtifact}|${t.text}';
     return _tokenParsed.putIfAbsent(key, () {
       final types = [if (t.isArtifact) 'Artifact', if (t.isCreature) 'Creature', if (t.isLand) 'Land'];
-      final card = Card(id: 'token:$key', name: t.name.isEmpty ? 'Token' : t.name, file: '', typeLine: '${types.join(' ')} — ${t.subtypes.join(' ')}', types: types, subtypes: t.subtypes, supertypes: [if (t.isLegendary) 'Legendary'], oracleText: t.text, token: true);
+      final card = Card(
+        id: 'token:$key',
+        name: t.name.isEmpty ? 'Token' : t.name,
+        file: '',
+        typeLine: '${types.join(' ')} — ${t.subtypes.join(' ')}',
+        types: types,
+        subtypes: t.subtypes,
+        supertypes: [if (t.isLegendary) 'Legendary'],
+        oracleText: t.text,
+        token: true,
+      );
       return AbilityParser.parse(card);
     });
   }

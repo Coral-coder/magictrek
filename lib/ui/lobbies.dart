@@ -24,19 +24,28 @@ class DeckPicker extends StatelessWidget {
     final store = AppStore.shared;
     return SizedBox(
       height: 62,
-      child: ListView(scrollDirection: Axis.horizontal, children: [
-        for (final d in store.legalDecks)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: SizedBox(
-              width: 130,
-              child: LcarsButton(d.name, height: 58, color: d.isStarter ? LCARS.lavender : LCARS.peach, fill: selected?.id == d.id, onPressed: () {
-                Console.shared.play(Fx.tap);
-                onSelect(d);
-              }),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final d in store.legalDecks)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: SizedBox(
+                width: 130,
+                child: LcarsButton(
+                  d.name,
+                  height: 58,
+                  color: d.isStarter ? LCARS.lavender : LCARS.peach,
+                  fill: selected?.id == d.id,
+                  onPressed: () {
+                    Console.shared.play(Fx.tap);
+                    onSelect(d);
+                  },
+                ),
+              ),
             ),
-          ),
-      ]),
+        ],
+      ),
     );
   }
 }
@@ -68,34 +77,49 @@ class _NewGameScreenState extends State<NewGameScreen> {
       subtitle: 'choose decks',
       color: widget.hotseat ? LCARS.butterscotch : LCARS.orange,
       onBack: () => Navigator.pop(context),
-      child: ListView(padding: const EdgeInsets.only(bottom: 30), children: [
-        if (store.savedGame != null)
-          LcarsPanel(
-            title: 'Saved game',
-            color: LCARS.gold,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('A local game is in progress. Starting a new one replaces it.', style: LCARS.label),
-              const SizedBox(height: 4),
-              LcarsButton('Resume it instead', color: LCARS.gold, height: 34, onPressed: () {
-                if (store.resumeLocalGame() != null) Navigator.pushReplacementNamed(context, '/game');
-              }),
-            ]),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 30),
+        children: [
+          if (store.savedGame != null)
+            LcarsPanel(
+              title: 'Saved game',
+              color: LCARS.gold,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('A local game is in progress. Starting a new one replaces it.', style: LCARS.label),
+                  const SizedBox(height: 4),
+                  LcarsButton(
+                    'Resume it instead',
+                    color: LCARS.gold,
+                    height: 34,
+                    onPressed: () {
+                      if (store.resumeLocalGame() != null) Navigator.pushReplacementNamed(context, '/game');
+                    },
+                  ),
+                ],
+              ),
+            ),
+          LcarsHeader(widget.hotseat ? 'Player 1 deck' : 'Your deck', color: LCARS.peach),
+          DeckPicker(selected: deck, onSelect: (d) => setState(() => deck = d)),
+          LcarsHeader(widget.hotseat ? 'Player 2 deck' : "Computer's deck", color: LCARS.lavender),
+          DeckPicker(selected: opponentDeck, onSelect: (d) => setState(() => opponentDeck = d)),
+          const SizedBox(height: 12),
+          LcarsButton(
+            'Engage',
+            height: 50,
+            onPressed: deck == null || opponentDeck == null
+                ? null
+                : () {
+                    Console.shared.play(Fx.confirm);
+                    store.startLocalGame(deck: deck!, opponentDeck: opponentDeck!, hotseat: widget.hotseat);
+                    Navigator.pushReplacementNamed(context, '/game');
+                  },
           ),
-        LcarsHeader(widget.hotseat ? 'Player 1 deck' : 'Your deck', color: LCARS.peach),
-        DeckPicker(selected: deck, onSelect: (d) => setState(() => deck = d)),
-        LcarsHeader(widget.hotseat ? 'Player 2 deck' : "Computer's deck", color: LCARS.lavender),
-        DeckPicker(selected: opponentDeck, onSelect: (d) => setState(() => opponentDeck = d)),
-        const SizedBox(height: 12),
-        LcarsButton('Engage', height: 50, onPressed: deck == null || opponentDeck == null
-            ? null
-            : () {
-                Console.shared.play(Fx.confirm);
-                store.startLocalGame(deck: deck!, opponentDeck: opponentDeck!, hotseat: widget.hotseat);
-                Navigator.pushReplacementNamed(context, '/game');
-              }),
-        const SizedBox(height: 8),
-        Text('Decks need 60 cards. The computer plays any legal deck.', style: LCARS.small.copyWith(color: LCARS.gray)),
-      ]),
+          const SizedBox(height: 8),
+          Text('Decks need 60 cards. The computer plays any legal deck.', style: LCARS.small.copyWith(color: LCARS.gray)),
+        ],
+      ),
     );
   }
 }
@@ -155,7 +179,11 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
       await h.start(name: store.playerName, id: store.deviceId);
       host = h;
       _subs.add(h.connections.listen(_onConnected));
-      setState(() => status = kind == LinkKind.lan ? 'Hosting on Wi‑Fi as ${store.playerName}${h is LanHost ? ' (port ${h.port})' : ''}. Waiting for a player…' : 'Hosting over Bluetooth as ${store.playerName}. Waiting for a player…');
+      setState(
+        () => status = kind == LinkKind.lan
+            ? 'Hosting on Wi‑Fi as ${store.playerName}${h is LanHost ? ' (port ${h.port})' : ''}. Waiting for a player…'
+            : 'Hosting over Bluetooth as ${store.playerName}. Waiting for a player…',
+      );
     } catch (e) {
       setState(() {
         hosting = false;
@@ -277,62 +305,105 @@ class _LocalLobbyScreenState extends State<LocalLobbyScreen> {
       color: LCARS.butterscotch,
       blocks: const [LCARS.orange, LCARS.peach, LCARS.lavender, LCARS.blue, LCARS.gold],
       onBack: () => Navigator.pop(context),
-      child: ListView(padding: const EdgeInsets.only(bottom: 30), children: [
-        Text('Both phones on the same Wi‑Fi, or Bluetooth with no network at all. One player hosts, the other joins.', style: LCARS.label),
-        const LcarsHeader('Link', color: LCARS.orange),
-        Row(children: [
-          Expanded(child: LcarsButton('Wi‑Fi / LAN', icon: Icons.wifi, height: 36, fill: kind == LinkKind.lan, onPressed: () => setState(() => kind = LinkKind.lan))),
-          const SizedBox(width: 6),
-          Expanded(child: LcarsButton('Bluetooth', icon: Icons.bluetooth, height: 36, fill: kind == LinkKind.bluetooth, onPressed: () => setState(() => kind = LinkKind.bluetooth))),
-        ]),
-        const LcarsHeader('Your deck', color: LCARS.peach),
-        DeckPicker(selected: deck, onSelect: (d) => setState(() => deck = d)),
-        const LcarsHeader('Host', color: LCARS.gold),
-        LcarsButton(hosting ? 'Hosting… (tap to stop)' : 'Host a game', color: LCARS.gold, onPressed: deck == null
-            ? null
-            : () async {
-                if (hosting) {
-                  await _stopAll();
-                  setState(() {
-                    hosting = false;
-                    status = '';
-                  });
-                } else {
-                  startHosting();
-                }
-              }),
-        const LcarsHeader('Join', color: LCARS.lavender),
-        LcarsButton(scanning ? 'Scanning… (tap to stop)' : 'Find hosts nearby', color: LCARS.lavender, onPressed: deck == null
-            ? null
-            : () async {
-                if (scanning) {
-                  await _stopAll();
-                  setState(() {
-                    scanning = false;
-                    status = '';
-                  });
-                } else {
-                  startScanning();
-                }
-              }),
-        for (final p in peers) Padding(padding: const EdgeInsets.only(top: 6), child: LcarsButton('${p.name}  ·  ${p.kind == LinkKind.lan ? p.address : 'Bluetooth'}', icon: Icons.login, color: LCARS.ice, onPressed: busy ? null : () => join(p))),
-        if (kind == LinkKind.lan) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: TextField(
-                controller: addressController,
-                style: LCARS.body,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(isDense: true, filled: true, fillColor: LCARS.panel, border: OutlineInputBorder(borderSide: BorderSide.none), hintText: 'or host address:port'),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 30),
+        children: [
+          Text('Both phones on the same Wi‑Fi, or Bluetooth with no network at all. One player hosts, the other joins.', style: LCARS.label),
+          const LcarsHeader('Link', color: LCARS.orange),
+          Row(
+            children: [
+              Expanded(
+                child: LcarsButton('Wi‑Fi / LAN', icon: Icons.wifi, height: 36, fill: kind == LinkKind.lan, onPressed: () => setState(() => kind = LinkKind.lan)),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: LcarsButton('Bluetooth', icon: Icons.bluetooth, height: 36, fill: kind == LinkKind.bluetooth, onPressed: () => setState(() => kind = LinkKind.bluetooth)),
+              ),
+            ],
+          ),
+          const LcarsHeader('Your deck', color: LCARS.peach),
+          DeckPicker(selected: deck, onSelect: (d) => setState(() => deck = d)),
+          const LcarsHeader('Host', color: LCARS.gold),
+          LcarsButton(
+            hosting ? 'Hosting… (tap to stop)' : 'Host a game',
+            color: LCARS.gold,
+            onPressed: deck == null
+                ? null
+                : () async {
+                    if (hosting) {
+                      await _stopAll();
+                      setState(() {
+                        hosting = false;
+                        status = '';
+                      });
+                    } else {
+                      startHosting();
+                    }
+                  },
+          ),
+          const LcarsHeader('Join', color: LCARS.lavender),
+          LcarsButton(
+            scanning ? 'Scanning… (tap to stop)' : 'Find hosts nearby',
+            color: LCARS.lavender,
+            onPressed: deck == null
+                ? null
+                : () async {
+                    if (scanning) {
+                      await _stopAll();
+                      setState(() {
+                        scanning = false;
+                        status = '';
+                      });
+                    } else {
+                      startScanning();
+                    }
+                  },
+          ),
+          for (final p in peers)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: LcarsButton('${p.name}  ·  ${p.kind == LinkKind.lan ? p.address : 'Bluetooth'}', icon: Icons.login, color: LCARS.ice, onPressed: busy ? null : () => join(p)),
+            ),
+          if (kind == LinkKind.lan) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: addressController,
+                    style: LCARS.body,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: LCARS.panel,
+                      border: OutlineInputBorder(borderSide: BorderSide.none),
+                      hintText: 'or host address:port',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 80,
+                  child: LcarsButton('Join', height: 36, color: LCARS.lavender, fill: false, onPressed: busy || deck == null ? null : joinAddress),
+                ),
+              ],
+            ),
+          ],
+          if (status.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  if (hosting || scanning || busy) const Padding(padding: EdgeInsets.only(right: 8), child: ScanLine()),
+                  Expanded(
+                    child: Text(status, style: LCARS.label.copyWith(color: LCARS.gold)),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 6),
-            SizedBox(width: 80, child: LcarsButton('Join', height: 36, color: LCARS.lavender, fill: false, onPressed: busy || deck == null ? null : joinAddress)),
-          ]),
         ],
-        if (status.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 10), child: Row(children: [if (hosting || scanning || busy) const Padding(padding: EdgeInsets.only(right: 8), child: ScanLine()), Expanded(child: Text(status, style: LCARS.label.copyWith(color: LCARS.gold)))])),
-      ]),
+      ),
     );
   }
 }
@@ -411,56 +482,111 @@ class _RemoteLobbyScreenState extends State<RemoteLobbyScreen> {
       color: LCARS.blue,
       blocks: const [LCARS.skyBlue, LCARS.lavender, LCARS.peach, LCARS.orange, LCARS.ice],
       onBack: () => Navigator.pop(context),
-      child: ListView(padding: const EdgeInsets.only(bottom: 30), children: [
-        Text('Play someone anywhere. Moves travel encrypted through public relays, so nobody runs a server and a match can continue days later: open it again and it catches up.', style: LCARS.label),
-        const LcarsHeader('Your deck', color: LCARS.peach),
-        DeckPicker(selected: deck, onSelect: (d) => setState(() => deck = d)),
-        const LcarsHeader('Host a match', color: LCARS.orange),
-        LcarsButton('Create a match code', color: LCARS.orange, onPressed: deck == null ? null : () => open(newMatchCode(), isHost: true)),
-        if (hostedCode != null)
-          LcarsPanel(
-            title: 'Match code',
-            color: LCARS.gold,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SelectableText(hostedCode!, style: LCARS.font(38, color: LCARS.gold)),
-              Row(children: [
-                Expanded(child: LcarsButton('Share', icon: Icons.share, height: 34, color: LCARS.gold, onPressed: () => SharePlus.instance.share(ShareParams(text: 'Join my MagicTrek game: code $hostedCode')))),
-                const SizedBox(width: 6),
-                Expanded(child: LcarsButton('Copy', icon: Icons.copy, height: 34, color: LCARS.gold, fill: false, onPressed: () => Clipboard.setData(ClipboardData(text: hostedCode!)))),
-              ]),
-            ]),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 30),
+        children: [
+          Text(
+            'Play someone anywhere. Moves travel encrypted through public relays, so nobody runs a server and a match can continue days later: open it again and it catches up.',
+            style: LCARS.label,
           ),
-        const LcarsHeader('Join a match', color: LCARS.lavender),
-        Row(children: [
-          Expanded(
-            child: TextField(
-              controller: codeController,
-              style: LCARS.font(22),
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(isDense: true, filled: true, fillColor: LCARS.panel, border: OutlineInputBorder(borderSide: BorderSide.none), hintText: 'CODE'),
+          const LcarsHeader('Your deck', color: LCARS.peach),
+          DeckPicker(selected: deck, onSelect: (d) => setState(() => deck = d)),
+          const LcarsHeader('Host a match', color: LCARS.orange),
+          LcarsButton('Create a match code', color: LCARS.orange, onPressed: deck == null ? null : () => open(newMatchCode(), isHost: true)),
+          if (hostedCode != null)
+            LcarsPanel(
+              title: 'Match code',
+              color: LCARS.gold,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(hostedCode!, style: LCARS.font(38, color: LCARS.gold)),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: LcarsButton(
+                          'Share',
+                          icon: Icons.share,
+                          height: 34,
+                          color: LCARS.gold,
+                          onPressed: () => SharePlus.instance.share(ShareParams(text: 'Join my MagicTrek game: code $hostedCode')),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: LcarsButton(
+                          'Copy',
+                          icon: Icons.copy,
+                          height: 34,
+                          color: LCARS.gold,
+                          fill: false,
+                          onPressed: () => Clipboard.setData(ClipboardData(text: hostedCode!)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
+          const LcarsHeader('Join a match', color: LCARS.lavender),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: codeController,
+                  style: LCARS.font(22),
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: LCARS.panel,
+                    border: OutlineInputBorder(borderSide: BorderSide.none),
+                    hintText: 'CODE',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 90,
+                child: LcarsButton('Join', color: LCARS.lavender, onPressed: deck == null ? null : () => open(codeController.text.trim().toUpperCase(), isHost: false)),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
-          SizedBox(width: 90, child: LcarsButton('Join', color: LCARS.lavender, onPressed: deck == null ? null : () => open(codeController.text.trim().toUpperCase(), isHost: false))),
-        ]),
-        if (store.remoteMatches.isNotEmpty) const LcarsHeader('Your matches', color: LCARS.skyBlue),
-        for (final m in store.remoteMatches)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(children: [
-              Expanded(child: LcarsButton('${m['code']}  ·  ${m['host'] == true ? 'hosted' : 'joined'}${m['opponent'] != null ? ' · vs ${m['opponent']}' : ''}', color: LCARS.skyBlue, fill: false, onPressed: deck == null ? null : () => open(m['code'] as String, isHost: m['host'] as bool))),
-              IconButton(icon: const Icon(Icons.close, color: LCARS.gray), onPressed: () => store.forgetRemoteMatch(m['code'] as String)),
-            ]),
-          ),
-        if (status.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Row(children: [
-              if (match != null && match!.game == null) const Padding(padding: EdgeInsets.only(right: 8), child: ScanLine()),
-              Expanded(child: Text('$status${transport != null ? '  ($relaysUp relays connected)' : ''}', style: LCARS.label.copyWith(color: LCARS.gold))),
-            ]),
-          ),
-      ]),
+          if (store.remoteMatches.isNotEmpty) const LcarsHeader('Your matches', color: LCARS.skyBlue),
+          for (final m in store.remoteMatches)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: LcarsButton(
+                      '${m['code']}  ·  ${m['host'] == true ? 'hosted' : 'joined'}${m['opponent'] != null ? ' · vs ${m['opponent']}' : ''}',
+                      color: LCARS.skyBlue,
+                      fill: false,
+                      onPressed: deck == null ? null : () => open(m['code'] as String, isHost: m['host'] as bool),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: LCARS.gray),
+                    onPressed: () => store.forgetRemoteMatch(m['code'] as String),
+                  ),
+                ],
+              ),
+            ),
+          if (status.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  if (match != null && match!.game == null) const Padding(padding: EdgeInsets.only(right: 8), child: ScanLine()),
+                  Expanded(
+                    child: Text('$status${transport != null ? '  ($relaysUp relays connected)' : ''}', style: LCARS.label.copyWith(color: LCARS.gold)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -41,8 +41,15 @@ class LCARS {
     }
   }
 
-  static TextStyle font(double size, {FontWeight weight = FontWeight.w700, Color color = peach}) =>
-      TextStyle(fontSize: size, fontWeight: weight, color: color, fontFamily: 'sans-serif-condensed', fontFamilyFallback: const ['Arial Narrow', 'HelveticaNeue-CondensedBold', 'Roboto'], letterSpacing: 0.5, height: 1.1);
+  static TextStyle font(double size, {FontWeight weight = FontWeight.w700, Color color = peach}) => TextStyle(
+    fontSize: size,
+    fontWeight: weight,
+    color: color,
+    fontFamily: 'sans-serif-condensed',
+    fontFamilyFallback: const ['Arial Narrow', 'HelveticaNeue-CondensedBold', 'Roboto'],
+    letterSpacing: 0.5,
+    height: 1.1,
+  );
   static TextStyle get title => font(30, color: orange);
   static TextStyle get heading => font(20);
   static TextStyle get body => font(15, weight: FontWeight.w600);
@@ -50,16 +57,23 @@ class LCARS {
   static TextStyle get small => font(10);
 
   static ThemeData theme() => ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: black,
-        colorScheme: const ColorScheme.dark(primary: orange, secondary: lavender, surface: panel),
-        useMaterial3: true,
-        textTheme: TextTheme(bodyMedium: font(14, weight: FontWeight.w500), bodyLarge: font(16, weight: FontWeight.w500), titleLarge: font(22)),
-        appBarTheme: const AppBarTheme(backgroundColor: black, foregroundColor: orange),
-        dialogTheme: const DialogThemeData(backgroundColor: panel),
-        bottomSheetTheme: const BottomSheetThemeData(backgroundColor: panel),
-        snackBarTheme: SnackBarThemeData(backgroundColor: gold, contentTextStyle: font(13, color: black)),
-      );
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: black,
+    colorScheme: const ColorScheme.dark(primary: orange, secondary: lavender, surface: panel),
+    useMaterial3: true,
+    textTheme: TextTheme(
+      bodyMedium: font(14, weight: FontWeight.w500),
+      bodyLarge: font(16, weight: FontWeight.w500),
+      titleLarge: font(22),
+    ),
+    appBarTheme: const AppBarTheme(backgroundColor: black, foregroundColor: orange),
+    dialogTheme: const DialogThemeData(backgroundColor: panel),
+    bottomSheetTheme: const BottomSheetThemeData(backgroundColor: panel),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: gold,
+      contentTextStyle: font(13, color: black),
+    ),
+  );
 }
 
 /// The classic LCARS elbow: a bar along the top that turns down the left side.
@@ -90,7 +104,16 @@ class ElbowPainter extends CustomPainter {
 
 /// The screen frame: elbow in the corner, a column of colored blocks down the left, content on the right.
 class LcarsFrame extends StatelessWidget {
-  const LcarsFrame({super.key, required this.title, this.subtitle = '', this.color = LCARS.orange, this.blocks = const [LCARS.lavender, LCARS.blue, LCARS.peach, LCARS.butterscotch, LCARS.skyBlue], required this.child, this.onBack, this.actions = const []});
+  const LcarsFrame({
+    super.key,
+    required this.title,
+    this.subtitle = '',
+    this.color = LCARS.orange,
+    this.blocks = const [LCARS.lavender, LCARS.blue, LCARS.peach, LCARS.butterscotch, LCARS.skyBlue],
+    required this.child,
+    this.onBack,
+    this.actions = const [],
+  });
   final String title, subtitle;
   final Color color;
   final List<Color> blocks;
@@ -111,7 +134,9 @@ class LcarsFrame extends StatelessWidget {
           Positioned.fill(
             top: top + 4,
             left: 6,
-            child: CustomPaint(painter: ElbowPainter(color: color, barHeight: 28, columnWidth: column, outerRadius: 40, innerRadius: 12)),
+            child: CustomPaint(
+              painter: ElbowPainter(color: color, barHeight: 28, columnWidth: column, outerRadius: 40, innerRadius: 12),
+            ),
           ),
           Positioned(
             top: top + 4 + 28 + 14 + 40,
@@ -121,15 +146,38 @@ class LcarsFrame extends StatelessWidget {
             child: Column(
               children: [
                 for (var i = 0; i < blocks.length; i++) ...[
-                  if (i < blocks.length - 1) Container(height: _heights[i % _heights.length], margin: const EdgeInsets.only(bottom: 4), color: blocks[i]) else Expanded(child: Container(margin: const EdgeInsets.only(bottom: 4), color: blocks[i])),
+                  if (i < blocks.length - 1)
+                    Container(height: _heights[i % _heights.length], margin: const EdgeInsets.only(bottom: 4), color: blocks[i])
+                  else
+                    Expanded(
+                      child: Container(margin: const EdgeInsets.only(bottom: 4), color: blocks[i]),
+                    ),
                 ],
-                Container(height: 40, decoration: BoxDecoration(color: color, borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(28)))),
+                Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(28)),
+                  ),
+                ),
               ],
             ),
           ),
           // Black gap between the elbow and the blocks.
-          Positioned(top: top + 4 + 28 + 14, left: 6, width: column, height: 40, child: const ColoredBox(color: LCARS.black)),
-          Positioned(top: top + 4 + 28 + 14 + 4, left: 6, width: column, height: 32, child: ColoredBox(color: blocks.first.withValues(alpha: 0.0))),
+          Positioned(
+            top: top + 4 + 28 + 14,
+            left: 6,
+            width: column,
+            height: 40,
+            child: const ColoredBox(color: LCARS.black),
+          ),
+          Positioned(
+            top: top + 4 + 28 + 14 + 4,
+            left: 6,
+            width: column,
+            height: 32,
+            child: ColoredBox(color: blocks.first.withValues(alpha: 0.0)),
+          ),
           Positioned(
             top: top + 4,
             left: 6,
@@ -140,15 +188,41 @@ class LcarsFrame extends StatelessWidget {
               children: [
                 const SizedBox(width: 48),
                 if (onBack != null)
-                  GestureDetector(onTap: onBack, behavior: HitTestBehavior.opaque, child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.chevron_left, color: LCARS.black, size: 26)))
+                  GestureDetector(
+                    onTap: onBack,
+                    behavior: HitTestBehavior.opaque,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Icon(Icons.chevron_left, color: LCARS.black, size: 26),
+                    ),
+                  )
                 else
                   const SizedBox(width: 8),
-                if (subtitle.isNotEmpty) Flexible(child: Text(subtitle.toUpperCase(), style: LCARS.font(11, color: LCARS.black), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (subtitle.isNotEmpty)
+                  Flexible(
+                    child: Text(
+                      subtitle.toUpperCase(),
+                      style: LCARS.font(11, color: LCARS.black),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 const SizedBox(width: 8),
                 ...actions,
                 Flexible(
                   flex: 3,
-                  child: ColoredBox(color: LCARS.black, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text(title.toUpperCase(), style: LCARS.font(22, color: color), maxLines: 1, overflow: TextOverflow.ellipsis))),
+                  child: ColoredBox(
+                    color: LCARS.black,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text(
+                        title.toUpperCase(),
+                        style: LCARS.font(22, color: color),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 10),
               ],
@@ -169,12 +243,17 @@ class LcarsBar extends StatelessWidget {
   final double height;
   @override
   Widget build(BuildContext context) => Container(
-        height: height,
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(height / 2)),
-        child: Text(text.toUpperCase(), style: LCARS.font(12, color: LCARS.black), maxLines: 1, overflow: TextOverflow.ellipsis),
-      );
+    height: height,
+    alignment: Alignment.centerRight,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(height / 2)),
+    child: Text(
+      text.toUpperCase(),
+      style: LCARS.font(12, color: LCARS.black),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    ),
+  );
 }
 
 /// A header line: a bar, a text label, a bar.
@@ -184,15 +263,33 @@ class LcarsHeader extends StatelessWidget {
   final Color color;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [
-          Container(width: 34, height: 12, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6))),
-          const SizedBox(width: 6),
-          Flexible(child: Text(title.toUpperCase(), style: LCARS.font(18, color: color), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          const SizedBox(width: 6),
-          Expanded(child: Container(height: 12, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)))),
-        ]),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      children: [
+        Container(
+          width: 34,
+          height: 12,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            title.toUpperCase(),
+            style: LCARS.font(18, color: color),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Container(
+            height: 12,
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// LCARS pill buttons: solid color, black condensed text.
@@ -217,11 +314,26 @@ class LcarsButton extends StatelessWidget {
         child: Container(
           height: height,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(color: fill ? color : color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(height / 2), border: fill ? null : Border.all(color: color, width: 2)),
-          child: Row(mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (icon != null) ...[Icon(icon, color: fg, size: 18), const SizedBox(width: 8)],
-            Flexible(child: Text(label.toUpperCase(), style: LCARS.font(14, color: fg), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ]),
+          decoration: BoxDecoration(
+            color: fill ? color : color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(height / 2),
+            border: fill ? null : Border.all(color: color, width: 2),
+          ),
+          child: Row(
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[Icon(icon, color: fg, size: 18), const SizedBox(width: 8)],
+              Flexible(
+                child: Text(
+                  label.toUpperCase(),
+                  style: LCARS.font(14, color: fg),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -236,14 +348,25 @@ class LcarsPanel extends StatelessWidget {
   final Color color;
   final Widget child;
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (title.isNotEmpty) LcarsHeader(title, color: color),
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(width: 6, height: 24, margin: const EdgeInsets.only(top: 2), decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (title.isNotEmpty) LcarsHeader(title, color: color),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 6,
+            height: 24,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+          ),
           const SizedBox(width: 8),
           Expanded(child: child),
-        ]),
-      ]);
+        ],
+      ),
+    ],
+  );
 }
 
 /// A small numeric readout (life, cards, mana).
@@ -252,10 +375,20 @@ class LcarsReadout extends StatelessWidget {
   final String label, value;
   final Color color;
   @override
-  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-        AnimatedSwitcher(duration: const Duration(milliseconds: 250), child: Text(value, key: ValueKey(value), style: LCARS.font(24, color: color))),
-        Text(label.toUpperCase(), style: LCARS.font(9, color: LCARS.gray)),
-      ]);
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: Text(
+          value,
+          key: ValueKey(value),
+          style: LCARS.font(24, color: color),
+        ),
+      ),
+      Text(label.toUpperCase(), style: LCARS.font(9, color: LCARS.gray)),
+    ],
+  );
 }
 
 /// A sweeping scan line, for "working" states.
@@ -277,13 +410,20 @@ class _ScanLineState extends State<ScanLine> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        width: widget.width,
-        height: 4,
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, _) => Align(alignment: Alignment(_c.value * 2 - 1, 0), child: Container(width: 40, height: 4, decoration: BoxDecoration(color: widget.color, borderRadius: BorderRadius.circular(2)))),
+    width: widget.width,
+    height: 4,
+    child: AnimatedBuilder(
+      animation: _c,
+      builder: (_, _) => Align(
+        alignment: Alignment(_c.value * 2 - 1, 0),
+        child: Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(color: widget.color, borderRadius: BorderRadius.circular(2)),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 /// A starfield for backgrounds.
@@ -292,7 +432,9 @@ class Starfield extends StatelessWidget {
   final int count;
   final double opacity;
   @override
-  Widget build(BuildContext context) => IgnorePointer(child: CustomPaint(painter: _StarPainter(count, opacity), size: Size.infinite));
+  Widget build(BuildContext context) => IgnorePointer(
+    child: CustomPaint(painter: _StarPainter(count, opacity), size: Size.infinite),
+  );
 }
 
 class _StarPainter extends CustomPainter {
@@ -335,16 +477,22 @@ class ManaCostPips extends StatelessWidget {
         cur += ch;
       }
     }
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      for (final s in symbols)
-        Container(
-          width: size,
-          height: size,
-          margin: const EdgeInsets.only(right: 2),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: LCARS.forMana(s), shape: BoxShape.circle),
-          child: Text(s, style: TextStyle(fontSize: size * 0.62, fontWeight: FontWeight.w900, color: LCARS.black)),
-        ),
-    ]);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final s in symbols)
+          Container(
+            width: size,
+            height: size,
+            margin: const EdgeInsets.only(right: 2),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: LCARS.forMana(s), shape: BoxShape.circle),
+            child: Text(
+              s,
+              style: TextStyle(fontSize: size * 0.62, fontWeight: FontWeight.w900, color: LCARS.black),
+            ),
+          ),
+      ],
+    );
   }
 }

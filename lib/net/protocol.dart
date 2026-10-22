@@ -17,8 +17,17 @@ const protocolVersion = 1;
 ///
 /// Messages (JSON): hello, start, action, need (ask for actions from a seq), state (digest check).
 class LockstepMatch {
-  LockstepMatch({required this.transport, required this.db, required this.localName, required this.localId, required this.localDeck, required this.isHost, int? seed, this.engineVersion = 1, this.rules = Rules.standard})
-      : _seed = seed ?? DateTime.now().microsecondsSinceEpoch & 0x7FFFFFFFFFFF {
+  LockstepMatch({
+    required this.transport,
+    required this.db,
+    required this.localName,
+    required this.localId,
+    required this.localDeck,
+    required this.isHost,
+    int? seed,
+    this.engineVersion = 1,
+    this.rules = Rules.standard,
+  }) : _seed = seed ?? DateTime.now().microsecondsSinceEpoch & 0x7FFFFFFFFFFF {
     _sub = transport.messages.listen(_onMessage, onError: (_) {});
     _stateSub = transport.stateChanges.listen((s) {
       if (s == LinkState.connected) _sendHello();
@@ -144,7 +153,13 @@ class LockstepMatch {
     final deck = remoteDeck;
     if (deck == null) return;
     game ??= _buildGame(_seed, [localName, remoteName!], [localDeck, deck]);
-    _send({'t': 'start', 'seed': _seed, 'names': [localName, remoteName], 'decks': [localDeck, deck], 'rules': rules.toJson()});
+    _send({
+      't': 'start',
+      'seed': _seed,
+      'names': [localName, remoteName],
+      'decks': [localDeck, deck],
+      'rules': rules.toJson(),
+    });
   }
 
   Game _buildGame(int seed, List<String> names, List<List<String>> decks) {

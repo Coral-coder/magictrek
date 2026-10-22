@@ -55,9 +55,9 @@ void main() {
     expect(db.parsed(db.byName('Swamp')!).manaColors, [ManaColor.black]);
     final full = db.distinctCards.where((c) => db.parsed(c).fullySupported).length;
     final partial = db.distinctCards.where((c) => !db.parsed(c).fullySupported && db.parsed(c).anySupported).length;
-    // The Swift parser reached 117 fully / 60 partially; the Dart port must not regress.
-    expect(full, greaterThanOrEqualTo(117), reason: '$full fully supported');
-    expect(partial, greaterThanOrEqualTo(55), reason: '$partial partially supported');
+    // Nearly every card's text is understood; the few left are at least partly.
+    expect(full, greaterThanOrEqualTo(225), reason: '$full fully supported');
+    expect(full + partial, greaterThanOrEqualTo(232), reason: '${full + partial} at least partly supported');
     final burst = db.parsed(db.byName('Burst Lightning')!);
     expect(burst.kicker, isNotNull);
     expect(burst.spellEffects.whereType<KickedInstead>(), isNotEmpty);
@@ -71,7 +71,7 @@ void main() {
     final h = ManaCost.parse('{X}{U/B}{C}');
     expect(h.hasX, isTrue);
     expect(h.hybrid, [
-      [ManaColor.blue, ManaColor.black]
+      [ManaColor.blue, ManaColor.black],
     ]);
     expect(h.generic, 1);
   });
@@ -131,6 +131,7 @@ void main() {
         }
         return Deck(name: 'Chaos', cards: cards);
       }
+
       playBotGame(seed, [deck(pick), deck(pick.skip(40))], maxActions: 1500);
     }
   });

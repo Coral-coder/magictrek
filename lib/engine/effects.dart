@@ -154,6 +154,9 @@ extension GameEffects on Game {
       case AttachedCreatureTarget _:
         final host = source == null ? null : state.objects[source]?.attachedTo;
         return host == null ? [] : [host];
+      case TriggeringTarget _:
+        final t = context.triggeringObject;
+        return t == null ? [] : [t];
       case EachTarget e:
         final f = e.filter;
         if (f.isPlayerFilter) {
@@ -572,7 +575,11 @@ extension GameEffects on Game {
         final many = x.oneOrMoreIfHandEmpty && state.players[controller].hand.isEmpty;
         String label(int i) => '${i < x.labels.length ? '${x.labels[i]}: ' : ''}${describeEffects(x.modes[i])}';
         if (state.players[controller].isBot) {
-          final picks = many ? allowed : [Bot.chooseMode(this, [for (final i in allowed) x.modes[i]], controller, source)].map((j) => allowed[j]).toList();
+          final picks = many
+              ? allowed
+              : [
+                  Bot.chooseMode(this, [for (final i in allowed) x.modes[i]], controller, source),
+                ].map((j) => allowed[j]).toList();
           for (final i in picks.reversed) {
             remaining.insertAll(0, x.modes[i]);
           }
@@ -594,7 +601,15 @@ extension GameEffects on Game {
           state.pending = PendingDecision(
             player: controller,
             decision: ChooseModeDecision('$srcName: choose one', [for (final i in allowed) label(i)]),
-            resume: Resume(source: source, controller: controller, effects: List.of(remaining), context: ctx, kind: ResumeKind.mode, modes: [for (final i in allowed) x.modes[i]], cards: x.unchosenOnly ? allowed : const []),
+            resume: Resume(
+              source: source,
+              controller: controller,
+              effects: List.of(remaining),
+              context: ctx,
+              kind: ResumeKind.mode,
+              modes: [for (final i in allowed) x.modes[i]],
+              cards: x.unchosenOnly ? allowed : const [],
+            ),
           );
         }
         remaining.clear();
@@ -969,7 +984,16 @@ extension GameEffects on Game {
       case Delayed x:
         final object = ctx.lastTouched;
         if (object == null) return false;
-        state.delayed.add(DelayedTrigger(event: x.event == DelayedEventKind.lastTouchedDies ? DelayedEvent.dies : DelayedEvent.nextCombat, object: object, controller: controller, source: source ?? object, effects: x.effects, turn: state.turn));
+        state.delayed.add(
+          DelayedTrigger(
+            event: x.event == DelayedEventKind.lastTouchedDies ? DelayedEvent.dies : DelayedEvent.nextCombat,
+            object: object,
+            controller: controller,
+            source: source ?? object,
+            effects: x.effects,
+            turn: state.turn,
+          ),
+        );
         return true;
       case BecomeType x:
         final ids = targets(x.target, '$srcName: choose a creature');
@@ -995,7 +1019,12 @@ extension GameEffects on Game {
         if (source == null) return false;
         final c = card(source);
         if (c == null) return false;
-        final copy = newObject(cardID: c.id, owner: controller, zone: Zone.battlefield, token: TokenSpec(name: c.name, isArtifact: c.isArtifact, isCreature: c.isCreature, isLegendary: c.isLegendary));
+        final copy = newObject(
+          cardID: c.id,
+          owner: controller,
+          zone: Zone.battlefield,
+          token: TokenSpec(name: c.name, isArtifact: c.isArtifact, isCreature: c.isCreature, isLegendary: c.isLegendary),
+        );
         state.objects[copy]!.controller = controller;
         state.objects[copy]!.enteredTurn = state.turn;
         state.players[controller].battlefield.add(copy);
@@ -1146,7 +1175,6 @@ extension GameEffects on Game {
     }
   }
 
-
   /// Puts a card from wherever it is into a zone, with what entering involves.
   void putCard(ObjectID id, LibraryDestination dest, PlayerID controller, {CounterKind? counter}) {
     final c = card(id);
@@ -1200,6 +1228,7 @@ extension GameEffects on Game {
       if (p.nonland && c.isLand) return false;
       return true;
     }
+
     if (test(pred)) return true;
     final alt = pred.or;
     return alt != null && test(alt);

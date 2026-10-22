@@ -40,6 +40,7 @@ extension GameQueries on Game {
     final id = o.copiedCardID ?? o.cardID;
     return id.isEmpty ? null : db[id];
   }
+
   Card? card(ObjectID id) {
     final o = state.objects[id];
     return o == null ? null : cardOf(o);
@@ -240,6 +241,8 @@ extension GameQueries on Game {
       case FilterKind.token:
         if (!o.isToken) return false;
       case FilterKind.creatureCardInGraveyard:
+      case FilterKind.cardInGraveyard:
+      case FilterKind.permanentCardInGraveyard:
       case FilterKind.basicLandCardInLibrary:
       case FilterKind.spell:
         return false;
@@ -288,14 +291,16 @@ extension GameQueries on Game {
       }
       return out;
     }
-    if (f.kind == FilterKind.creatureCardInGraveyard) {
+    if (f.kind == FilterKind.creatureCardInGraveyard || f.kind == FilterKind.cardInGraveyard || f.kind == FilterKind.permanentCardInGraveyard) {
       for (final p in state.players) {
         if (f.controller == Controller.you && p.id != controller) continue;
         if (f.controller == Controller.opponent && p.id == controller) continue;
         for (final id in p.graveyard) {
           final o = state.objects[id];
           final c = o == null ? null : cardOf(o);
-          if (c == null || !c.isCreature) continue;
+          if (c == null) continue;
+          if (f.kind == FilterKind.creatureCardInGraveyard && !c.isCreature) continue;
+          if (f.kind == FilterKind.permanentCardInGraveyard && (c.isInstant || c.isSorcery)) continue;
           if (f.maxManaValue != null && c.manaValue > f.maxManaValue!) continue;
           out.add(id);
         }
@@ -535,6 +540,83 @@ extension GameQueries on Game {
   }
 
   bool canPay(ManaCost cost, PlayerID player) => manaPlan(cost, player) != null;
+
+  /// The abilities a card has where it is now: a permanent's active abilities, or a card's own
+  /// abilities in a hand or graveyard (only those activated from there can be used).
+  List<Ability> abilitiesIn(GameObject o) {
+    if (o.zone == Zone.battlefield) return activeAbilities(o);
+    return parsedOf(o)?.abilities ?? const [];
+  }
+
+  /// The permanents a "tap N untapped …" cost would tap: the least valuable ones, never the source.
+  List<ObjectID>? tapOthersChoice(ActivationCost cost, PlayerID p, ObjectID source) {
+    final f = cost.tapOthersFilter;
+    if (cost.tapOthers == 0 || f == null) return const [];
+    final ready = state.permanentsOf(p).where((o) => o.id != source && !o.tapped && matches(f, o.id, p, source)).toList()
+      ..sort((a, b) {
+        final pa = characteristics(a.id).power, pb = characteristics(b.id).power;
+        return pa != pb ? pa - pb : a.id - b.id;
+      });
+    if (ready.length < cost.tapOthers) return null;
+    return ready.take(cost.tapOthers).map((o) => o.id).toList();
+  }
+
+  /// The counters "remove N counters from among creatures you control" would take: any kind but
+  /// +1/+1 first, from the creatures holding the most.
+  List<(ObjectID, CounterKind)>? removeCountersChoice(ActivationCost cost, PlayerID p) {
+    if (cost.removeCounters == 0) return const [];
+    final pool = <(ObjectID, CounterKind)>[];
+    final holders = state.permanentsOf(p).where((o) => characteristics(o.id).isCreature).toList()..sort((a, b) => a.id - b.id);
+    for (final pass in [false, true]) {
+      for (final o in holders) {
+        for (final e in o.counters.entries.toList()..sort((a, b) => a.key.index - b.key.index)) {
+          if ((e.key == CounterKind.plusOne) != pass) continue;
+          for (var i = 0; i < e.value; i++) {
+            pool.add((o.id, e.key));
+          }
+        }
+      }
+    }
+    if (pool.length < cost.removeCounters) return null;
+    return pool.take(cost.removeCounters).toList();
+  }
+
+  /// Why the ability can't be activated now, or null if it can (targets and choices aside).
+  String? activationProblem(ObjectID id, int index, PlayerID p) {
+    final o = state.objects[id];
+    if (o == null) return 'No such ability';
+    final all = abilitiesIn(o);
+    if (index >= all.length) return 'No such ability';
+    final ability = all[index];
+    if (ability is! Activated) return 'No such ability';
+    final cost = ability.cost;
+    switch (cost.zone) {
+      case AbilityZone.battlefield:
+        if (o.zone != Zone.battlefield || o.controller != p) return 'Not yours to use';
+      case AbilityZone.hand:
+        if (o.zone != Zone.hand || o.owner != p) return 'Only from your hand';
+      case AbilityZone.graveyard:
+        if (o.zone != Zone.graveyard || o.owner != p) return 'Only from your graveyard';
+    }
+    if (ability.sorcerySpeed && (!state.phase.isMain || state.priority != null || state.stack.isNotEmpty || state.activePlayer != p)) return 'Only as a sorcery';
+    if (cost.oncePerTurn && o.activatedThisTurn.contains(index)) return 'Already used this turn';
+    if (cost.tap) {
+      if (o.tapped) return 'Already tapped';
+      if (characteristics(id).isCreature && hasSummoningSickness(o)) return 'Summoning sick';
+    }
+    if (cost.payLife > 0 && state.players[p].life <= cost.payLife) return 'Not enough life';
+    if (cost.minDifferentLands > 0 && amount(const Amount.counted(AmountKind.differentlyNamedLands), p, id, EffectContext()) < cost.minDifferentLands) {
+      return 'Needs ${cost.minDifferentLands} differently named lands';
+    }
+    if (tapOthersChoice(cost, p, id) == null) return 'Not enough untapped permanents to tap';
+    if (removeCountersChoice(cost, p) == null) return 'Not enough counters';
+    if (cost.discard > 0 && state.players[p].hand.where((h) => h != id).length < cost.discard) return 'No card to discard';
+    final f = cost.sacrifice;
+    if (f != null && !state.permanentsOf(p).any((x) => matches(f, x.id, p, id))) return 'Nothing to sacrifice';
+    if (!canPay(cost.mana, p)) return 'Not enough mana';
+    return null;
+  }
+
   int availableMana(PlayerID p) => manaSources(p).length;
 
   /// Whether a card in hand can be cast now (timing + mana), ignoring targets.

@@ -31,6 +31,7 @@ class AppStore extends ChangeNotifier {
   String deviceId = '';
   String relayIdentity = '';
   List<String> relays = List.of(defaultRelays);
+
   /// Remote matches this device has hosted or joined: code -> {name, host, opponent, date}.
   List<Map<String, dynamic>> remoteMatches = [];
   bool ready = false;
@@ -188,7 +189,13 @@ class AppStore extends ChangeNotifier {
     if (saved == null) return null;
     try {
       final mode = SessionMode.values.byName(saved['mode'] as String);
-      final s = GameSession.local(mode: mode, playerNames: (saved['names'] as List).cast<String>(), seed: saved['seed'] as int, decks: (saved['decks'] as List).map((d) => (d as List).cast<String>()).toList(), db: db);
+      final s = GameSession.local(
+        mode: mode,
+        playerNames: (saved['names'] as List).cast<String>(),
+        seed: saved['seed'] as int,
+        decks: (saved['decks'] as List).map((d) => (d as List).cast<String>()).toList(),
+        db: db,
+      );
       _attach(s);
       s.replay((saved['actions'] as List).map((a) => GameAction.fromJson(a as Map<String, dynamic>)).toList());
       return s;

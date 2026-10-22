@@ -24,8 +24,10 @@ enum KeywordKind {
   unblockable("can't be blocked"),
   cantBlock("can't block"),
   mustAttack('attacks each combat if able'),
+
   /// "can't be blocked by creatures with power N or less" (value = N).
   evadesSmall("can't be blocked by small creatures"),
+
   /// "can't be blocked by more than one creature".
   oneBlocker("can't be blocked by more than one creature");
 
@@ -85,23 +87,32 @@ enum AmountKind {
   cardsInHand,
   differentlyNamedLands,
   thisPower,
+
   /// Federation: the number of creature types among non-Borg creatures you control.
   creatureTypesNonBorg,
+
   /// The X paid when the spell was cast.
   x,
   twiceX,
+
   /// A number carried by the trigger (combat damage dealt...).
   eventAmount,
+
   /// Artifact and/or creature cards in your graveyard.
   artifactOrCreatureCardsInGraveyard,
+
   /// Dilemmas (modes chosen) you've faced this turn.
   dilemmasThisTurn,
+
   /// Opponents attacked this turn.
   opponentsAttacked,
+
   /// Permanents of a creature type you control ("the number of Officers you control").
   subtypeYouControl,
+
   /// How many things the previous effect affected "this way".
   countedThisWay,
+
   /// Other creatures you control with a Communicator attached.
   otherCreaturesWithCommunicator,
 }
@@ -111,6 +122,7 @@ class Amount with Props {
   const Amount.counted(this.kind, {this.subtype}) : n = 0;
   final AmountKind kind;
   final int n;
+
   /// For `AmountKind.subtypeYouControl`: "the number of Officers you control".
   final String? subtype;
   static const one = Amount.fixed(1);
@@ -142,6 +154,10 @@ enum FilterKind {
   basicLandCardInLibrary,
   artifactOrCreature,
   spell,
+
+  /// Any card in a graveyard / a permanent card in a graveyard.
+  cardInGraveyard,
+  permanentCardInGraveyard,
 }
 
 /// Which permanents or players something applies to.
@@ -183,7 +199,27 @@ class Filter with Props {
     ..minManaValue = minManaValue;
 
   @override
-  List<Object?> get props => [kind, controller, other, attacking, tapped, untapped, nontoken, nonartifact, blocking, withCounters, legendary, nonBorg, enteredThisTurn, historic, subtype, maxPower, minPower, maxManaValue, minManaValue];
+  List<Object?> get props => [
+    kind,
+    controller,
+    other,
+    attacking,
+    tapped,
+    untapped,
+    nontoken,
+    nonartifact,
+    blocking,
+    withCounters,
+    legendary,
+    nonBorg,
+    enteredThisTurn,
+    historic,
+    subtype,
+    maxPower,
+    minPower,
+    maxManaValue,
+    minManaValue,
+  ];
 
   @override
   String toString() => 'Filter(${kind.name}${controller != Controller.any ? ' ${controller.name}' : ''}${subtype != null ? ' $subtype' : ''})';
@@ -197,6 +233,7 @@ sealed class Target with Props {
   static const Target lastTarget = LastTarget();
   static const Target controllerOfLastTarget = ControllerOfLastTarget();
   static const Target attachedCreature = AttachedCreatureTarget();
+  static const Target triggering = TriggeringTarget();
 }
 
 class ThisTarget extends Target {
@@ -219,6 +256,14 @@ class LastTarget extends Target {
 
 class ControllerOfLastTarget extends Target {
   const ControllerOfLastTarget();
+  @override
+  List<Object?> get props => const [];
+}
+
+/// The permanent or player that made a trigger fire ("that creature" in "Whenever a creature
+/// you control enters, put a +1/+1 counter on that creature").
+class TriggeringTarget extends Target {
+  const TriggeringTarget();
   @override
   List<Object?> get props => const [];
 }
@@ -264,9 +309,9 @@ class TokenSpec with Props {
     this.isLand = false,
     this.isLegendary = false,
     this.text = '',
-  })  : colors = colors ?? [],
-        subtypes = subtypes ?? [],
-        keywords = keywords ?? [];
+  }) : colors = colors ?? [],
+       subtypes = subtypes ?? [],
+       keywords = keywords ?? [];
 
   String name;
   final int power, toughness;
@@ -284,46 +329,46 @@ class TokenSpec with Props {
   static TokenSpec get food => TokenSpec(name: 'Food', subtypes: ['Food'], isArtifact: true, isCreature: false, text: '{2}, {T}, Sacrifice ~: You gain 3 life.');
 
   TokenSpec copyWith({List<Keyword>? keywords, String? name, bool? isLegendary}) => TokenSpec(
-        name: name ?? this.name,
-        power: power,
-        toughness: toughness,
-        colors: List.of(colors),
-        subtypes: List.of(subtypes),
-        keywords: keywords ?? List.of(this.keywords),
-        isArtifact: isArtifact,
-        isCreature: isCreature,
-        isLand: isLand,
-        isLegendary: isLegendary ?? this.isLegendary,
-        text: text,
-      );
+    name: name ?? this.name,
+    power: power,
+    toughness: toughness,
+    colors: List.of(colors),
+    subtypes: List.of(subtypes),
+    keywords: keywords ?? List.of(this.keywords),
+    isArtifact: isArtifact,
+    isCreature: isCreature,
+    isLand: isLand,
+    isLegendary: isLegendary ?? this.isLegendary,
+    text: text,
+  );
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'power': power,
-        'toughness': toughness,
-        'colors': colors.map((c) => c.symbol).toList(),
-        'subtypes': subtypes,
-        'keywords': keywords.map((k) => [k.kind.name, k.value]).toList(),
-        'isArtifact': isArtifact,
-        'isCreature': isCreature,
-        if (isLand) 'isLand': true,
-        if (isLegendary) 'isLegendary': true,
-        if (text.isNotEmpty) 'text': text,
-      };
+    'name': name,
+    'power': power,
+    'toughness': toughness,
+    'colors': colors.map((c) => c.symbol).toList(),
+    'subtypes': subtypes,
+    'keywords': keywords.map((k) => [k.kind.name, k.value]).toList(),
+    'isArtifact': isArtifact,
+    'isCreature': isCreature,
+    if (isLand) 'isLand': true,
+    if (isLegendary) 'isLegendary': true,
+    if (text.isNotEmpty) 'text': text,
+  };
 
   factory TokenSpec.fromJson(Map<String, dynamic> j) => TokenSpec(
-        name: j['name'] as String,
-        power: j['power'] as int,
-        toughness: j['toughness'] as int,
-        colors: (j['colors'] as List).map((e) => ManaColor.fromSymbol(e as String)).whereType<ManaColor>().toList(),
-        subtypes: (j['subtypes'] as List).cast<String>(),
-        keywords: (j['keywords'] as List).map((e) => Keyword(KeywordKind.values.byName((e as List)[0] as String), e[1] as int)).toList(),
-        isArtifact: j['isArtifact'] as bool,
-        isCreature: j['isCreature'] as bool,
-        isLand: j['isLand'] as bool? ?? false,
-        isLegendary: j['isLegendary'] as bool? ?? false,
-        text: j['text'] as String? ?? '',
-      );
+    name: j['name'] as String,
+    power: j['power'] as int,
+    toughness: j['toughness'] as int,
+    colors: (j['colors'] as List).map((e) => ManaColor.fromSymbol(e as String)).whereType<ManaColor>().toList(),
+    subtypes: (j['subtypes'] as List).cast<String>(),
+    keywords: (j['keywords'] as List).map((e) => Keyword(KeywordKind.values.byName((e as List)[0] as String), e[1] as int)).toList(),
+    isArtifact: j['isArtifact'] as bool,
+    isCreature: j['isCreature'] as bool,
+    isLand: j['isLand'] as bool? ?? false,
+    isLegendary: j['isLegendary'] as bool? ?? false,
+    text: j['text'] as String? ?? '',
+  );
 
   @override
   List<Object?> get props => [name, power, toughness, colors, subtypes, keywords, isArtifact, isCreature, isLand, isLegendary, text];
@@ -351,24 +396,34 @@ enum LibraryDestination { hand, battlefield, battlefieldTapped, libraryTop, libr
 enum Condition {
   thisIsCreature,
   thisIsNotCreature,
+
   /// The last thing touched is a creature ("If it's a creature, ...").
   lastIsCreature,
+
   /// You control a permanent with a counter on it.
   controlPermanentWithCounter,
+
   /// This permanent has at least `n` counters of `counter` on it.
   selfCountersAtLeast,
+
   /// This is the `n`th time this ability resolved this turn.
   resolvedTimes,
+
   /// The previous effect counted at least `n` things "this way".
   countedAtLeast,
+
   /// Creatures you control have total power `n` or greater.
   totalPowerAtLeast,
+
   /// This is the first spell you've cast this game.
   firstSpellThisGame,
+
   /// You control at least `n` differently named lands.
   differentLandsAtLeast,
+
   /// The thing sacrificed or touched "this way" has the creature type `subtype`.
   lastHasSubtype,
+
   /// You have no cards in hand.
   handEmpty,
 }
@@ -469,6 +524,7 @@ class CreateTokens extends Effect {
   final Amount amount;
   final Target target; // who gets them
   final bool tapped;
+
   /// "Sacrifice it at the beginning of the next end step."
   final bool sacrificeAtEnd;
   @override
@@ -534,8 +590,10 @@ class ReturnFromGraveyard extends Effect {
   const ReturnFromGraveyard(this.filter, this.destination, {this.underOwnersControl = false, this.counter});
   final Filter filter;
   final LibraryDestination destination;
+
   /// General Picard: "onto the battlefield under its owner's control".
   final bool underOwnersControl;
+
   /// "with a finality counter on it".
   final CounterKind? counter;
   @override
@@ -599,10 +657,13 @@ class PutLandFromHand extends Effect {
 class Modal extends Effect {
   const Modal(this.modes, {this.labels = const [], this.unchosenOnly = false, this.oneOrMoreIfHandEmpty = false});
   final List<List<Effect>> modes;
+
   /// The modes' names ("Hail", "Sensors"...), when they have them.
   final List<String> labels;
+
   /// Kobayashi Maru: "choose one that hasn't been chosen".
   final bool unchosenOnly;
+
   /// Captain Kirk: "If you have no cards in hand, choose one or more instead."
   final bool oneOrMoreIfHandEmpty;
   @override
@@ -700,6 +761,7 @@ class CopyToken extends Effect {
   final Target target;
   final List<Keyword> extra;
   final bool nonLegendary, tapped, hasteUntilEndOfTurn, sacrificeAtEnd;
+
   /// "for each creature target opponent controls, create a token that's a copy of that creature".
   final bool eachCreatureOfTarget;
   @override
@@ -710,11 +772,13 @@ class Conditional extends Effect {
   const Conditional(this.condition, this.effects, {this.otherwise = const [], this.n = 0, this.counter, this.subtype, this.negate = false});
   final Condition condition;
   final List<Effect> effects;
+
   /// What happens when the condition fails ("... instead").
   final List<Effect> otherwise;
   final int n;
   final CounterKind? counter;
   final String? subtype;
+
   /// "unless": run the effects when the condition is false.
   final bool negate;
   @override
@@ -732,10 +796,22 @@ class CounterSpell extends Effect {
 
 /// What kind of card a library or graveyard search may pick.
 class CardPred with Props {
-  const CardPred({this.types = const [], this.notTypes = const [], this.subtypes = const [], this.names = const [], this.maxManaValue, this.permanent = false, this.nonland = false, this.basicLand = false, this.or});
+  const CardPred({
+    this.types = const [],
+    this.notTypes = const [],
+    this.subtypes = const [],
+    this.names = const [],
+    this.maxManaValue,
+    this.permanent = false,
+    this.nonland = false,
+    this.basicLand = false,
+    this.or,
+  });
+
   /// All of these types ("Creature"); `or` widens it ("a Plains card or nonland permanent card").
   final List<String> types;
   final List<String> notTypes;
+
   /// Any of these subtypes ("Klingon or Warrior").
   final List<String> subtypes;
   final List<String> names;
@@ -759,6 +835,7 @@ class LookAtTop extends Effect {
   final LibraryDestination destination;
   final RestDestination rest;
   final bool optional;
+
   /// Pick among the cards the previous effect affected (First Contact's milled cards) instead.
   final bool fromAffected;
   @override
@@ -812,6 +889,7 @@ class HandChoice extends Effect {
   final CardPred pick;
   final bool drawAfter;
   final int ownerMayPlayForMore;
+
   /// V'Ger: just look at the hand.
   final bool lookOnly;
   @override
@@ -1063,28 +1141,42 @@ enum SimpleTriggerKind {
   gainLife,
   drawCard,
   stationed,
+
   /// Your first (precombat) main phase.
   firstMain,
+
   /// The beginning of combat on each player's turn.
   eachBeginCombat,
+
   /// You declare one or more attackers.
   youAttack,
+
   /// A card leaves your graveyard.
   cardLeavesYourGraveyard,
+
   /// You draw a card / an opponent draws a card / you draw your second card this turn.
   youDraw,
   opponentDraws,
   secondCardDrawn,
+
   /// You play a land or cast a spell from exile.
   playFromExile,
+
   /// You choose one or more modes for a spell or ability.
   faceDilemma,
+
   /// Charge counters are put on this for the first time this turn.
   chargedFirstTime,
+
   /// "When you cast this spell".
   castThis,
+
   /// The equipped creature attacks.
   equippedAttacks,
+
+  /// The beginning of each player's end step.
+  eachEndStep,
+
   /// A creature you control with a counter on it deals combat damage to a player.
   counteredCreatureHitsPlayer,
 }
@@ -1120,6 +1212,7 @@ class SimpleTrigger extends TriggerEvent {
   static const chargedFirstTime = SimpleTrigger(SimpleTriggerKind.chargedFirstTime);
   static const castThis = SimpleTrigger(SimpleTriggerKind.castThis);
   static const equippedAttacks = SimpleTrigger(SimpleTriggerKind.equippedAttacks);
+  static const eachEndStep = SimpleTrigger(SimpleTriggerKind.eachEndStep);
   static const counteredCreatureHitsPlayer = SimpleTrigger(SimpleTriggerKind.counteredCreatureHitsPlayer);
   @override
   List<Object?> get props => [kind];
@@ -1144,8 +1237,10 @@ class PermanentDiesTrigger extends TriggerEvent {
 class CastSpellTrigger extends TriggerEvent {
   const CastSpellTrigger(this.kind, {this.who = Controller.you, this.manaValueIsChosenNumber = false});
   final SpellKind kind;
+
   /// Whose spells: yours, an opponent's, or anyone's.
   final Controller who;
+
   /// Nyota Uhura: only spells whose mana value is the number chosen as she entered.
   final bool manaValueIsChosenNumber;
   @override
@@ -1180,28 +1275,40 @@ enum SimpleStaticKind {
   enchantCreature,
   enchantCreatureOpponentControls,
   attachedCantAttackOrBlock,
+
   /// Quark: you can't sacrifice Treasure tokens.
   cantSacrificeTreasures,
+
   /// Mr. Spock: if you would draw a card, draw two instead.
   drawTwoInstead,
+
   /// Geordi La Forge: charge counters on your artifacts are doubled.
   doubleChargeCounters,
+
   /// Dr. M'Benga: counters on your creatures are doubled.
   doubleCountersOnCreatures,
+
   /// Dr. Crusher: your life-gain triggers trigger an additional time.
   lifeGainTriggersTwice,
+
   /// Marooned: the enchanted permanent doesn't untap and can't be beamed up.
   attachedDoesntUntap,
+
   /// You may look at the top card of your library any time / play with it revealed.
   lookAtTop,
+
   /// Captain Pike: you may play lands from the top of your library.
   playLandsFromTop,
+
   /// Benjamin Sisko: lands and creature spells from the top of your library.
   playLandsAndCreaturesFromTop,
+
   /// "You may cast this card from exile."
   castSelfFromExile,
+
   /// The Holodeck: once during each of your turns, play a permanent card from your graveyard.
   playPermanentFromGraveyardOncePerTurn,
+
   /// The City on the Edge of Forever's Human token: permanents can't phase in.
   permanentsCantPhaseIn,
 }
@@ -1303,14 +1410,18 @@ class ActivationCost with Props {
   bool tap, sacrificeSelf, oncePerTurn;
   Filter? sacrifice;
   int payLife, discard;
+
   /// "Tap two untapped artifacts and/or creatures you control": how many, and which.
   int tapOthers = 0;
   Filter? tapOthersFilter;
+
   /// "Remove three counters from among creatures you control".
   int removeCounters = 0;
   AbilityZone zone = AbilityZone.battlefield;
+
   /// From the graveyard: exile this card, or put it on the bottom of the library, as the cost.
   bool exileSelf = false, bottomSelf = false;
+
   /// "Activate only if you control seven or more differently named lands".
   int minDifferentLands = 0;
   bool get isFree => mana.isFree && !tap && !sacrificeSelf && sacrifice == null && payLife == 0 && discard == 0 && tapOthers == 0 && removeCounters == 0;
@@ -1336,6 +1447,7 @@ class KeywordAbility extends Ability {
 class ManaAbility extends Ability {
   const ManaAbility(this.colors, {this.artifactSpellsOnly = false}); // {T}: Add one of these (empty = colorless)
   final List<ManaColor> colors;
+
   /// "Spend this mana only to cast an artifact spell."
   final bool artifactSpellsOnly;
   @override
@@ -1357,8 +1469,10 @@ class Triggered extends Ability {
   const Triggered(this.event, this.effects, {this.oncePerTurn = false, this.condition});
   final TriggerEvent event;
   final List<Effect> effects;
+
   /// "This ability triggers only once each turn."
   final bool oncePerTurn;
+
   /// An intervening "if"/"while" that must hold when the event happens.
   final TriggerCondition? condition;
   @override
@@ -1420,6 +1534,7 @@ class StationAbilities extends Ability {
   const StationAbilities(this.threshold, this.keywords, [this.extra = const []]);
   final int threshold;
   final List<Keyword> keywords;
+
   /// Other abilities the Spacecraft has once charged ("12+ | Artifact creatures you control have
   /// flying", "3+ | At the beginning of combat on your turn, ...").
   final List<Ability> extra;
@@ -1516,6 +1631,7 @@ class ParsedCard {
   bool get isAura => statics.contains(SimpleStatic.enchantCreature) || statics.contains(SimpleStatic.enchantCreatureOpponentControls);
   List<List<Effect>> triggers(TriggerEvent event) => abilities.whereType<Triggered>().where((t) => t.event == event).map((t) => t.effects).toList();
   int? get stationThreshold => abilities.whereType<StationAbilities>().map((s) => s.threshold).fold<int?>(null, (a, b) => a == null || b > a ? b : a);
+
   /// Every station line, lowest threshold first.
   List<StationAbilities> get stationLines => abilities.whereType<StationAbilities>().toList()..sort((a, b) => a.threshold - b.threshold);
   List<Keyword> get stationKeywords => abilities.whereType<StationAbilities>().map((s) => s.keywords).firstOrNull ?? const [];

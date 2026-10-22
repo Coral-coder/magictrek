@@ -19,21 +19,21 @@ enum SessionMode { solo, hotseat, linked }
 /// action log for saving, or defers to a LockstepMatch when the opponent is on another device.
 class GameSession extends ChangeNotifier {
   GameSession.local({required this.mode, required List<String> playerNames, required this.seed, required this.decks, required this.db, this.rules = Rules.standard})
-      : playerNames = List.of(playerNames),
-        match = null,
-        game = Game(playerNames: playerNames, bots: mode == SessionMode.solo ? const [false, true] : const [false, false], seed: seed, db: db) {
+    : playerNames = List.of(playerNames),
+      match = null,
+      game = Game(playerNames: playerNames, bots: mode == SessionMode.solo ? const [false, true] : const [false, false], seed: seed, db: db) {
     localSeat = 0;
   }
 
   /// Linked (LAN, Bluetooth or relay): the LockstepMatch owns the game.
   GameSession.linked({required LockstepMatch match, required this.db})
-      : mode = SessionMode.linked,
-        seed = 0,
-        rules = Rules.standard,
-        match = match,
-        playerNames = [match.game!.state.players[0].name, match.game!.state.players[1].name],
-        decks = const [],
-        game = match.game! {
+    : mode = SessionMode.linked,
+      seed = 0,
+      rules = Rules.standard,
+      match = match,
+      playerNames = [match.game!.state.players[0].name, match.game!.state.players[1].name],
+      decks = const [],
+      game = match.game! {
     localSeat = match.localSeat;
     _lastLogCount = game.state.log.length;
     _matchSub = match.events.listen((e) {
@@ -64,6 +64,7 @@ class GameSession extends ChangeNotifier {
   Timer? _botTimer;
   bool _botRunning = false;
   StreamSubscription? _matchSub;
+
   /// Called when a game is saved (solo/hotseat) so the store can refresh.
   void Function(Map<String, dynamic> saved)? onSave;
   void Function()? onFinished;
@@ -210,14 +211,7 @@ class GameSession extends ChangeNotifier {
 
   void _save() {
     if (mode == SessionMode.linked || state.isOver) return;
-    onSave?.call({
-      'mode': mode.name,
-      'seed': seed,
-      'names': playerNames,
-      'decks': decks,
-      'actions': actions.map((a) => a.toJson()).toList(),
-      'date': DateTime.now().toIso8601String(),
-    });
+    onSave?.call({'mode': mode.name, 'seed': seed, 'names': playerNames, 'decks': decks, 'actions': actions.map((a) => a.toJson()).toList(), 'date': DateTime.now().toIso8601String()});
   }
 
   String get saveJson => jsonEncode({'mode': mode.name, 'seed': seed, 'names': playerNames, 'decks': decks, 'actions': actions.map((a) => a.toJson()).toList()});

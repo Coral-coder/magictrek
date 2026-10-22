@@ -58,7 +58,7 @@ class _Parser {
     var i = 0;
     while (i < lines.length) {
       var line = lines[i];
-      if (line.endsWith('—') || line.toLowerCase().endsWith('choose one —')) {
+      if (i + 1 < lines.length && lines[i + 1].startsWith('•')) {
         var j = i + 1;
         while (j < lines.length && lines[j].startsWith('•')) {
           line += '\n${lines[j]}';
@@ -98,7 +98,11 @@ class _Parser {
     final fullName = card.name.replaceAll('U.S.S.', 'USS');
     final names = [fullName];
     final comma = fullName.indexOf(',');
-    if (comma >= 0) names.add(fullName.substring(0, comma));
+    final head = comma >= 0 ? fullName.substring(0, comma) : fullName;
+    if (comma >= 0) names.add(head);
+    // Legends call themselves by a shorter name: "Dr. Crusher", "Captain Burnham", "Captain Kirk".
+    final words = head.split(' ');
+    if (card.isLegendary && words.length >= 3) names.add('${words.first} ${words.last}');
     names.sort((a, b) => b.length - a.length);
     for (final n in names) {
       if (n.isNotEmpty) t = t.replaceAll(n, '~');
@@ -119,8 +123,11 @@ class _Parser {
       if (kws.length == parts.length) {
         abilities.add(StationAbilities(int.parse(station[1]), kws));
       } else {
-        abilities.add(StationAbilities(int.parse(station[1]), const []));
-        unsupported.add(line);
+        // "3+ | At the beginning of combat ...", "12+ | Artifact creatures you control have flying."
+        final sub = _Parser(card);
+        sub.parseLine(station[2]);
+        abilities.add(StationAbilities(int.parse(station[1]), const [], sub.abilities));
+        unsupported.addAll(sub.unsupported);
       }
       return;
     }
@@ -130,10 +137,23 @@ class _Parser {
     if (label != null && !label[1].toLowerCase().startsWith('choose')) body = label[2];
     final bl = body.toLowerCase();
 
+    final special = specialLine(_trimDot(bl));
+    if (special != null) {
+      abilities.addAll(special);
+      return;
+    }
     final kws = keywordLine(body);
     if (kws != null) {
       abilities.addAll(kws);
       return;
+    }
+    final restricted = rx(body, r'\{T\}: Add (.+?)\. Spend this mana only to cast an artifact spell\.?');
+    if (restricted != null) {
+      final colors = manaColors(restricted[1]);
+      if (colors != null) {
+        abilities.add(ManaAbility(colors, artifactSpellsOnly: true));
+        return;
+      }
     }
     final mana = rx(body, r'\{T\}: Add (.+?)\.?');
     if (mana != null) {
@@ -143,7 +163,7 @@ class _Parser {
         return;
       }
     }
-    final s = staticAbility(bl);
+    final s = staticAbility(bl, body);
     if (s != null) {
       abilities.add(StaticAbilityEntry(s));
       return;
@@ -152,7 +172,7 @@ class _Parser {
       parseTriggered(body);
       return;
     }
-    final act = rx(body, r'([^:]+): (.+)');
+    final act = rx(body, r'([^:"]+): (.+)', dotAll: true);
     if (act != null) {
       final cost = activationCost(act[1]);
       if (cost != null) {
@@ -172,6 +192,17 @@ class _Parser {
         if (m != null) {
           effectText = m[1];
           sorcery = true;
+        }
+        m = rx(effectText, r'(.+?)\s*Activate only as a sorcery and only once each turn\.?');
+        if (m != null) {
+          effectText = m[1];
+          sorcery = true;
+          cost.oncePerTurn = true;
+        }
+        m = rx(effectText, r'(.+?)\s*Activate only if you control (\w+) or more differently named lands\.?');
+        if (m != null) {
+          effectText = m[1];
+          cost.minDifferentLands = numberWord(m[2]) ?? 0;
         }
         final (fx, bad) = effects(effectText);
         if (bad.isEmpty && fx.isNotEmpty) {
@@ -235,6 +266,9 @@ class _Parser {
     if (w == 'ward') return const Keyword(KeywordKind.ward, 1);
     if (w == "can't be blocked" || w == "~ can't be blocked") return Keyword.unblockable;
     if (w == "can't block" || w == "~ can't block") return Keyword.cantBlock;
+    final small = rx(w, r"(?:~ )?can't be blocked by creatures with power (\d+) or less");
+    if (small != null) return Keyword(KeywordKind.evadesSmall, int.parse(small[1]));
+    if (w == "~ can't be blocked by more than one creature" || w == "can't be blocked by more than one creature") return const Keyword(KeywordKind.oneBlocker);
     final kind = KeywordKind.fromText(w);
     return kind == null ? null : Keyword(kind);
   }
@@ -285,6 +319,22 @@ class _Parser {
         out.add(const StaticAbilityEntry(SimpleStatic.enchantCreatureOpponentControls));
         continue;
       }
+      if (p == 'affinity for artifact creatures') {
+        out.add(Affinity(Filter(FilterKind.artifactCreature, controller: Controller.you)));
+        continue;
+      }
+      if (p == 'affinity for artifacts') {
+        out.add(Affinity(Filter(FilterKind.artifact, controller: Controller.you)));
+        continue;
+      }
+      if (p == 'sunburst') {
+        out.add(const Sunburst());
+        continue;
+      }
+      if (p == 'kicker—sacrifice an artifact or creature') {
+        out.add(SacrificeKicker(Filter(FilterKind.artifactOrCreature)));
+        continue;
+      }
       if (p == 'prowess') {
         out.add(const Triggered(CastSpellTrigger(SpellKind.noncreature), [Pump(1, 1, Target.thisObject, EffectDuration.endOfTurn)]));
         continue;
@@ -325,7 +375,8 @@ class _Parser {
 
   // MARK: Statics
 
-  StaticAbility? staticAbility(String l) {
+  StaticAbility? staticAbility(String l, [String? original]) {
+    final o = _trimDot(original ?? l);
     if (l == '~ enters tapped.' || l == '~ enters the battlefield tapped.') return SimpleStatic.entersTapped;
     List<String>? m;
     if ((m = rx(l, r'~ enters tapped unless you control (two|three) or more other lands\.')) != null) return EntersTappedUnless(numberWord(m![1]) ?? 2);
@@ -360,7 +411,9 @@ class _Parser {
       final kind = m![3] == 'artifact' ? AmountKind.artifactsYouControl : (m[3] == 'creature' ? AmountKind.creaturesYouControl : AmountKind.landsYouControl);
       return SelfPumpPerCount(Amount.counted(kind), int.parse(m[1]), int.parse(m[2]));
     }
-    if ((m = rx(l, r'(.+?) have "(.+)"')) != null) {
+    final simple = _simpleStatics[_trimDot(l)];
+    if (simple != null) return SimpleStatic(simple);
+    if ((m = rx(o, r'(.+?) have "(.+)"')) != null) {
       final f = filterFromPlural(m![1]);
       if (f != null) {
         final inner = m[2][0].toUpperCase() + m[2].substring(1);
@@ -369,7 +422,7 @@ class _Parser {
       }
       return null;
     }
-    if ((m = rx(l, r'(.+?) (?:get|have) (.+?)\.')) != null) {
+    if ((m = rx(o, r'(.+?) (?:get|have) (.+?)')) != null) {
       final f = filterFromPlural(m![1]);
       if (f != null) {
         final n = rx(m[2], r'([+-]\d+)/([+-]\d+)');
@@ -389,6 +442,17 @@ class _Parser {
       withCounters = true;
       text = text.substring(0, text.length - 22);
     }
+    for (final suffix in [' with a counter on it', ' with a counter on them']) {
+      if (text.endsWith(suffix)) {
+        withCounters = true;
+        text = text.substring(0, text.length - suffix.length);
+      }
+    }
+    var entered = false;
+    if (text.endsWith(' that entered this turn')) {
+      entered = true;
+      text = text.substring(0, text.length - 23);
+    }
     var words = text.split(' ').where((w) => w.isNotEmpty).toList();
     if (words.length < 2) return null;
     var controller = Controller.any;
@@ -400,7 +464,9 @@ class _Parser {
       words = words.sublist(0, words.length - 3);
     }
     if (controller == Controller.any || words.isEmpty) return null;
-    final f = Filter(FilterKind.permanent, controller: controller)..withCounters = withCounters;
+    final f = Filter(FilterKind.permanent, controller: controller)
+      ..withCounters = withCounters
+      ..enteredThisTurn = entered;
     var noun = words.removeLast();
     if (noun.endsWith('s')) noun = noun.substring(0, noun.length - 1);
     final original = s.split(' ');
@@ -439,6 +505,7 @@ class _Parser {
         case 'untapped':
           f.untapped = true;
         case 'legendary':
+          f.legendary = true;
         case 'nonlegendary':
         case 'all':
           break;
@@ -454,6 +521,30 @@ class _Parser {
     return f;
   }
 
+  static String _trimDot(String s) {
+    var t = s.trim();
+    while (t.endsWith('.')) {
+      t = t.substring(0, t.length - 1);
+    }
+    return t;
+  }
+
+  static const _simpleStatics = <String, SimpleStaticKind>{
+    "you can't sacrifice treasure tokens": SimpleStaticKind.cantSacrificeTreasures,
+    'if you would draw a card, draw two cards instead': SimpleStaticKind.drawTwoInstead,
+    'if you would put one or more charge counters on an artifact you control, put twice that many charge counters on that artifact instead': SimpleStaticKind.doubleChargeCounters,
+    'if you would put one or more counters on a creature you control, put twice that many of each of those kinds of counters on that creature instead': SimpleStaticKind.doubleCountersOnCreatures,
+    'if you gaining life causes a triggered ability of a permanent you control to trigger, that ability triggers an additional time': SimpleStaticKind.lifeGainTriggersTwice,
+    "enchanted permanent doesn't untap during its controller's untap step and can't be beamed up": SimpleStaticKind.attachedDoesntUntap,
+    'you may look at the top card of your library any time': SimpleStaticKind.lookAtTop,
+    'play with the top card of your library revealed': SimpleStaticKind.lookAtTop,
+    'you may play lands from the top of your library': SimpleStaticKind.playLandsFromTop,
+    'you may play lands and cast creature spells from the top of your library': SimpleStaticKind.playLandsAndCreaturesFromTop,
+    'you may cast ~ from exile': SimpleStaticKind.castSelfFromExile,
+    'once during each of your turns, you may play a permanent card you own from outside the game or from your graveyard': SimpleStaticKind.playPermanentFromGraveyardOncePerTurn,
+    "permanents can't phase in": SimpleStaticKind.permanentsCantPhaseIn,
+  };
+
   bool _endsWith(List<String> words, List<String> suffix) {
     if (words.length < suffix.length) return false;
     for (var i = 0; i < suffix.length; i++) {
@@ -466,19 +557,43 @@ class _Parser {
 
   // MARK: Triggers
 
+  /// A condition found at the start of a trigger's effects ("if you cast it, ...").
+  TriggerCondition? _cond;
+
   void parseTriggered(String line) {
-    final parts = triggerParts(line);
+    var text = line;
+    var once = false;
+    final o = rx(text, r'(.+?)\s*This ability triggers only once each turn\.?', dotAll: true);
+    if (o != null) {
+      text = o[1];
+      once = true;
+    }
+    _cond = null;
+    List<(TriggerEvent, List<Effect>)>? parts;
+    final w = rx(text, r'Whenever (you attack|~ attacks) while creatures you control have total power (\d+) or greater, (.+)', dotAll: true);
+    if (w != null) {
+      final fx = triggerEffects(w[3]);
+      _cond = TriggerCondition(TriggerConditionKind.totalPowerAtLeast, n: int.parse(w[2]));
+      if (fx != null) parts = [(w[1].toLowerCase() == 'you attack' ? SimpleTrigger.youAttack : SimpleTrigger.attacks, fx)];
+    } else {
+      parts = triggerParts(text);
+    }
     if (parts != null) {
       for (final (e, fx) in parts) {
-        abilities.add(Triggered(e, fx));
+        abilities.add(Triggered(e, fx, oncePerTurn: once, condition: _cond));
       }
     } else {
       unsupported.add(line);
     }
+    _cond = null;
   }
 
   List<(TriggerEvent, List<Effect>)>? triggerParts(String l) {
-    var m = rx(l, r"At the beginning of (your upkeep|your end step|combat on your turn|each combat|your precombat main phase|each upkeep|each end step|each opponent's upkeep), (.+)", dotAll: true);
+    var m = rx(
+      l,
+      r"At the beginning of (your upkeep|your end step|combat on your turn|combat on each player's turn|each combat|your precombat main phase|your first main phase|each upkeep|each end step|each opponent's upkeep), (.+)",
+      dotAll: true,
+    );
     if (m != null) {
       TriggerEvent? event;
       switch (m[1].toLowerCase()) {
@@ -488,16 +603,71 @@ class _Parser {
           event = SimpleTrigger.endStep;
         case 'combat on your turn':
           event = SimpleTrigger.beginCombat;
+        case "combat on each player's turn":
+          event = SimpleTrigger.eachBeginCombat;
         case 'each upkeep':
           event = SimpleTrigger.eachUpkeep;
+        case 'each end step':
+          event = SimpleTrigger.eachEndStep;
+        case 'your precombat main phase':
+        case 'your first main phase':
+          event = SimpleTrigger.firstMain;
       }
       final fx = triggerEffects(m[2]);
       if (event == null || fx == null) return null;
       return [(event, fx)];
     }
+    m = rx(l, r'When ~ enters and at the beginning of your upkeep, (.+)', dotAll: true);
+    if (m != null) {
+      final fx = triggerEffects(m[1]);
+      return fx == null ? null : [(SimpleTrigger.enters, fx), (SimpleTrigger.upkeep, fx)];
+    }
+    const simpleWhenevers = <String, SimpleTrigger>{
+      'Whenever you attack': SimpleTrigger.youAttack,
+      'Whenever you draw a card': SimpleTrigger.youDraw,
+      'Whenever an opponent draws a card': SimpleTrigger.opponentDraws,
+      'Whenever you draw your second card each turn': SimpleTrigger.secondCardDrawn,
+      'Whenever you face a dilemma': SimpleTrigger.faceDilemma,
+      'Whenever a card leaves your graveyard': SimpleTrigger.cardLeavesYourGraveyard,
+      'Whenever you play a card from exile': SimpleTrigger.playFromExile,
+      'Whenever one or more charge counters are put on ~ for the first time each turn': SimpleTrigger.chargedFirstTime,
+      'When you cast ~': SimpleTrigger.castThis,
+      'Whenever equipped creature attacks': SimpleTrigger.equippedAttacks,
+      'Whenever a creature you control with a counter on it deals combat damage to a player': SimpleTrigger.counteredCreatureHitsPlayer,
+    };
+    for (final e in simpleWhenevers.entries) {
+      final n = rx(l, '${RegExp.escape(e.key)}, (.+)', dotAll: true);
+      if (n != null) {
+        final fx = triggerEffects(n[1]);
+        return fx == null ? null : [(e.value, fx)];
+      }
+    }
     m = rx(
       l,
-      r'(When|Whenever) (.+?) (enters or attacks|attacks or blocks|enters untapped|enters|dies|die|attacks|blocks|becomes blocked|leaves the battlefield|deals combat damage to a player|deals combat damage to a player or planeswalker|deals combat damage to an opponent|becomes tapped|is put into a graveyard from the battlefield), (.+)',
+      r'Whenever (you|a player|an opponent) casts? (?:a|an) (noncreature|creature|artifact|instant or sorcery|creature or Spacecraft)? ?spell( with mana value equal to the chosen number)?, (.+)',
+      dotAll: true,
+    );
+    if (m != null) {
+      final kind =
+          const {
+            'noncreature': SpellKind.noncreature,
+            'creature': SpellKind.creature,
+            'artifact': SpellKind.artifact,
+            'instant or sorcery': SpellKind.instantOrSorcery,
+            'creature or spacecraft': SpellKind.creatureOrSpacecraft,
+          }[m[2].toLowerCase()] ??
+          SpellKind.any;
+      final who = switch (m[1].toLowerCase()) {
+        'you' => Controller.you,
+        'an opponent' => Controller.opponent,
+        _ => Controller.any,
+      };
+      final fx = triggerEffects(m[4]);
+      return fx == null ? null : [(CastSpellTrigger(kind, who: who, manaValueIsChosenNumber: m[3].isNotEmpty), fx)];
+    }
+    m = rx(
+      l,
+      r'(When|Whenever) (.+?) (enters or deals combat damage to a player|enters or attacks|attacks or blocks|enters untapped|enters|dies|die|attacks|blocks|becomes blocked|leaves the battlefield|deals combat damage to a player|deals combat damage to a player or planeswalker|deals combat damage to an opponent|becomes tapped|is put into a graveyard from the battlefield), (.+)',
       dotAll: true,
     );
     if (m == null) {
@@ -540,6 +710,8 @@ class _Parser {
           events = [SimpleTrigger.entersUntapped];
         case 'enters or attacks':
           events = [SimpleTrigger.enters, SimpleTrigger.attacks];
+        case 'enters or deals combat damage to a player':
+          events = [SimpleTrigger.enters, SimpleTrigger.combatDamageToPlayer];
         case 'attacks or blocks':
           events = [SimpleTrigger.attacks, SimpleTrigger.blocks];
         case 'dies':
@@ -585,7 +757,27 @@ class _Parser {
     return events.map((e) => (e, fx)).toList();
   }
 
-  List<Effect>? triggerEffects(String text) {
+  List<Effect>? triggerEffects(String textIn) {
+    var text = textIn;
+    const conditions = <String, TriggerConditionKind>{
+      'if you cast it, ': TriggerConditionKind.wasCast,
+      "if you've cast a noncreature spell this turn, ": TriggerConditionKind.castNoncreatureThisTurn,
+      'if a permanent was returned to your hand from the battlefield this turn, ': TriggerConditionKind.permanentReturnedToHandThisTurn,
+    };
+    for (final e in conditions.entries) {
+      if (text.toLowerCase().startsWith(e.key)) {
+        _cond = TriggerCondition(e.value);
+        text = text.substring(e.key.length);
+      }
+    }
+    final c = rx(text, r'if ~ has (\w+) or more (\w+) counters on it, (.+)', dotAll: true);
+    if (c != null) {
+      final kind = CounterKind.values.where((k) => k.text == c[2].toLowerCase()).firstOrNull;
+      if (kind != null) {
+        _cond = TriggerCondition(TriggerConditionKind.selfCountersAtLeast, n: numberWord(c[1]) ?? 0, counter: kind);
+        text = c[3];
+      }
+    }
     final (fx, bad) = effects(text);
     return bad.isEmpty && fx.isNotEmpty ? fx : null;
   }
@@ -689,7 +881,42 @@ class _Parser {
         cost.sacrificeSelf = true;
         continue;
       }
-      var m = rx(p, r'sacrifice (a|an|another) (creature|artifact|land|permanent|token)');
+      if (p == 'discard ~') {
+        cost.zone = AbilityZone.hand;
+        continue;
+      }
+      if (p == 'exile ~ from your graveyard') {
+        cost.zone = AbilityZone.graveyard;
+        cost.exileSelf = true;
+        continue;
+      }
+      if (p == 'put ~ from your graveyard on the bottom of your library') {
+        cost.zone = AbilityZone.graveyard;
+        cost.bottomSelf = true;
+        continue;
+      }
+      var m = rx(p, r'remove (\w+) counters from among creatures you control');
+      if (m != null) {
+        cost.removeCounters = numberWord(m[1]) ?? 1;
+        continue;
+      }
+      m = rx(p, r'tap (\w+) untapped (officers|artifacts and/or creatures) you control');
+      if (m != null) {
+        cost.tapOthers = numberWord(m[1]) ?? 1;
+        cost.tapOthersFilter = m[2] == 'officers' ? (Filter(FilterKind.creature, controller: Controller.you)..subtype = 'Officer') : Filter(FilterKind.artifactOrCreature, controller: Controller.you);
+        continue;
+      }
+      m = rx(p, r'sacrifice a (food|treasure|clue)');
+      if (m != null) {
+        cost.sacrifice = Filter(FilterKind.artifact, controller: Controller.you)..subtype = m[1][0].toUpperCase() + m[1].substring(1);
+        continue;
+      }
+      m = rx(p, r'sacrifice (another|a|an) (creature or artifact|artifact or creature)');
+      if (m != null) {
+        cost.sacrifice = Filter(FilterKind.artifactOrCreature, controller: Controller.you)..other = m[1] == 'another';
+        continue;
+      }
+      m = rx(p, r'sacrifice (a|an|another) (creature|artifact|land|permanent|token)');
       if (m != null) {
         final f = Filter(FilterKind.creature, controller: Controller.you);
         switch (m[2]) {
@@ -725,30 +952,86 @@ class _Parser {
     final out = <Effect>[];
     final bad = <String>[];
     final t = text.trim();
-    final modal = rx(t, r'choose one —\s*(.+)', dotAll: true);
+    final modal = rx(t, r"choose one(?: that hasn't been chosen)?(?: —|\. If you have no cards in hand, choose one or more instead\.)\s*(.+)", dotAll: true);
     if (modal != null) {
       final modes = <List<Effect>>[];
+      final labels = <String>[];
       for (final mode in modal[1].split('\n').map((s) => s.trim()).where((s) => s.startsWith('•'))) {
         var modeText = mode.substring(1).trim();
-        final named = rx(modeText, r'[A-Z][^—]+ — (.+)', dotAll: true);
-        if (named != null) modeText = named[1];
+        final named = rx(modeText, r'([A-Z][^—]+) — (.+)', dotAll: true);
+        if (named != null) {
+          labels.add(named[1].trim());
+          modeText = named[2];
+        }
         final (fx, b) = effects(modeText);
         if (b.isNotEmpty || fx.isEmpty) return ([], [t]);
         modes.add(fx);
       }
-      return modes.isEmpty ? ([], [t]) : ([Modal(modes)], []);
+      final lower = t.toLowerCase();
+      return modes.isEmpty
+          ? ([], [t])
+          : (
+              [Modal(modes, labels: labels.length == modes.length ? labels : const [], unchosenOnly: lower.contains("hasn't been chosen"), oneOrMoreIfHandEmpty: lower.contains('no cards in hand'))],
+              [],
+            );
     }
+    final whole = wholeText(t);
+    if (whole != null) return (whole, []);
+    _LookBuilder? look;
+    void flushLook() {
+      final b = look;
+      if (b != null) out.add(b.build());
+      look = null;
+    }
+
     for (final sentence in sentences(t)) {
       final l = sentence.toLowerCase();
-      if (l.startsWith('if you do, ') && out.isNotEmpty) {
-        final fx = effect(sentence.substring(11));
+      // "Look at the top N cards..." spans several sentences.
+      final lookStart = rx(l, r'look at the top (\w+) cards of your library(?:, where x is (.+))?');
+      if (lookStart != null) {
+        flushLook();
+        final n = lookStart[1] == 'x' ? countAmount(lookStart[2]) : amount(lookStart[1]);
+        if (n == null) {
+          bad.add(sentence);
+          continue;
+        }
+        look = _LookBuilder(n);
+        continue;
+      }
+      final lb = look;
+      if (lb != null) {
+        if (lb.absorb(l, this)) continue;
+        flushLook();
+      }
+      if (l.startsWith('you may put a permanent card from among them into your hand') && out.isNotEmpty && out.last is Mill) {
+        out.add(const LookAtTop(Amount.zero, CardPred(permanent: true), fromAffected: true));
+        continue;
+      }
+      // "Exile the top N cards ... . Until the end of your next turn, you may play those cards."
+      final play = rx(l, r'(?:until the end of your next turn, you may play (?:those cards|that card|them)|you may play (?:that card|those cards) this turn)');
+      if (play != null && out.isNotEmpty && out.last is ExileTopPlayable) {
+        final e = out.removeLast() as ExileTopPlayable;
+        out.add(ExileTopPlayable(e.n, untilNextTurn: l.contains('next turn')));
+        continue;
+      }
+      final doIt = rx(sentence, r'(?:if|when) you do, (.+)');
+      if (doIt != null && out.isNotEmpty) {
+        final fx = effect(doIt[1]);
         if (fx != null) {
           final last = out.last;
           if (last is Optional) {
-            out[out.length - 1] = Optional([...last.effects, ...fx]);
+            out[out.length - 1] = Optional([...last.effects, IfDidPrevious(fx)]);
           } else {
             out.add(IfDidPrevious(fx));
           }
+          continue;
+        }
+      }
+      final ifCant = rx(l, r"if you can't, exile (.+)");
+      if (ifCant != null && out.isNotEmpty && out.last is AssimilateExiledOrExile) {
+        final tg = target(ifCant[1]);
+        if (tg != null) {
+          out[out.length - 1] = AssimilateExiledOrExile(tg);
           continue;
         }
       }
@@ -767,6 +1050,7 @@ class _Parser {
         bad.add(sentence);
       }
     }
+    flushLook();
     return (out, bad);
   }
 
@@ -821,8 +1105,26 @@ class _Parser {
         return const Amount.counted(AmountKind.differentlyNamedLands);
       case 'cards in your hand':
         return const Amount.counted(AmountKind.cardsInHand);
+      case 'artifact creatures you control':
+        return const Amount.counted(AmountKind.artifactCreaturesYouControl);
+      case 'creature types among non-borg creatures you control':
+        return const Amount.counted(AmountKind.creatureTypesNonBorg);
+      case 'opponents you attacked this turn':
+        return const Amount.counted(AmountKind.opponentsAttacked);
+      case 'other creatures you control with a communicator attached to them':
+        return const Amount.counted(AmountKind.otherCreaturesWithCommunicator);
+      case 'officers you control':
+        return const Amount.counted(AmountKind.subtypeYouControl, subtype: 'Officer');
     }
     return null;
+  }
+
+  /// "the number of X" or "~'s power".
+  Amount? amountPhrase(String text) {
+    final t = text.toLowerCase().trim();
+    if (t == "~'s power" || t == 'its power') return const Amount.counted(AmountKind.thisPower);
+    final m = rx(t, r'the number of (.+)');
+    return m == null ? null : countAmount(m[1]);
   }
 
   /// One sentence to effects, or null.
@@ -832,6 +1134,8 @@ class _Parser {
     final l = s.toLowerCase();
     List<String>? m;
 
+    final extra = extraEffect(s, l);
+    if (extra != null) return extra;
     if (l.startsWith('you may ')) {
       final inner = effect(s.substring(8));
       return inner == null ? null : [Optional(inner)];
@@ -1220,6 +1524,8 @@ class _Parser {
   Filter? graveyardFilter(String text) {
     final l = text.toLowerCase();
     if (l == 'target creature card') return Filter(FilterKind.creatureCardInGraveyard, controller: Controller.you);
+    if (l == 'target permanent card') return Filter(FilterKind.permanentCardInGraveyard, controller: Controller.you);
+    if (l == 'target card') return Filter(FilterKind.cardInGraveyard, controller: Controller.you);
     final m = rx(l, r'target (artifact )?creature card with mana value (\d+) or less');
     if (m != null) return Filter(FilterKind.creatureCardInGraveyard, controller: Controller.you)..maxManaValue = int.parse(m[2]);
     return null;
@@ -1230,6 +1536,11 @@ class _Parser {
   Target? target(String textIn) {
     final t = textIn.trim().toLowerCase();
     switch (t) {
+      case 'they':
+      case 'that opponent':
+        return Target.lastTarget;
+      case 'enchanted permanent':
+        return Target.attachedCreature;
       case '~':
       case 'this':
         return Target.thisObject;
@@ -1262,11 +1573,17 @@ class _Parser {
       case 'target opponent or planeswalker':
         return ChosenTarget(Filter.opponent);
     }
-    var m = rx(t, r'up to (one|two|three) (?:other )?target (.+)');
+    var m = rx(t, r'up to (one|two|three) (other )?target (.+)');
     if (m != null) {
       final n = numberWord(m[1]);
-      final f = targetFilter(m[2]);
-      if (n != null && f != null) return ChosenTarget(f, count: n, optional: true);
+      final f = targetFilter(m[3]);
+      if (n != null && f != null) return ChosenTarget(f..other = f.other || m[2].isNotEmpty, count: n, optional: true);
+    }
+    if (t == 'target card from a graveyard') return ChosenTarget(Filter(FilterKind.cardInGraveyard));
+    m = rx(t, r'one or two target (.+)');
+    if (m != null) {
+      final f = targetFilter(m[1]);
+      if (f != null) return ChosenTarget(f, count: 2);
     }
     if ((m = rx(t, r'(another )?target (.+)')) != null) {
       final f = targetFilter(m![2]);
@@ -1280,6 +1597,8 @@ class _Parser {
       if (rest == 'creature' || rest == 'creatures') return EachTarget(Filter.creature);
       if (rest == 'other creature' || rest == 'other creatures') return EachTarget(Filter.creature..other = true);
       if (rest == 'opponent') return EachTarget(Filter.opponent);
+      if (rest == 'nonartifact creatures') return EachTarget(Filter.creature..nonartifact = true);
+      if (rest == 'artifacts and creatures') return EachTarget(Filter(FilterKind.artifactOrCreature));
       if (rest == 'player') return EachTarget(Filter.player);
       final f = filterFromPlural(rest.endsWith('s') ? rest : '${rest}s') ?? filterFromPlural(rest);
       return f == null ? null : EachTarget(f);
@@ -1323,6 +1642,7 @@ class _Parser {
       ('artifact or creature', FilterKind.artifactOrCreature),
       ('player or planeswalker', FilterKind.player),
       ('creature or player', FilterKind.creatureOrPlayer),
+      ('creature or artifact', FilterKind.artifactOrCreature),
       ('creature', FilterKind.creature),
       ('spacecraft', FilterKind.spacecraft),
       ('artifact', FilterKind.artifact),
@@ -1379,6 +1699,10 @@ class _Parser {
           f.nontoken = true;
         case 'nonartifact':
           f.nonartifact = true;
+        case 'legendary':
+          f.legendary = true;
+        case 'or':
+          break;
         case 'other':
         case 'another':
           f.other = true;
@@ -1393,4 +1717,461 @@ class _Parser {
     }
     return f;
   }
+
+  // MARK: Card phrases the general patterns don't cover
+
+  static TokenSpec get _officer => TokenSpec(name: 'Officer', power: 1, toughness: 1, colors: [ManaColor.red], subtypes: ['Officer']);
+  static TokenSpec get _borg => TokenSpec(name: 'Borg', power: 1, toughness: 1, subtypes: ['Borg'], isArtifact: true);
+
+  /// Single sentences with their own shape.
+  List<Effect>? extraEffect(String s, String l) {
+    List<String>? m;
+    if (l == 'you may exile a card from your hand') return const [ExileFromHand()];
+    if (l == 'investigate twice') return [CreateTokens(TokenSpec.clue, const Amount.fixed(2), Target.you)];
+    if (l == 'you lose the game') return const [LoseGame()];
+    if (l == 'you win the game') return const [WinGame()];
+    if (l == 'draw that many cards') return const [Draw(Amount.counted(AmountKind.eventAmount), Target.you)];
+    if (l == 'when that creature dies this turn, you draw a card')
+      return const [
+        Delayed(DelayedEventKind.lastTouchedDies, [Draw(Amount.one, Target.you)]),
+      ];
+    if (l == 'if that creature would die this turn, exile it instead') return const [ExileIfDiesThisTurn(Target.lastTarget)];
+    if (l == 'until end of turn, it gets +1/+1 and becomes a doctor') return const [Pump(1, 1, Target.lastTarget, EffectDuration.endOfTurn), BecomeType('Doctor', Target.lastTarget, replace: true)];
+    if (l == 'draw a card if you control a permanent with a counter on it')
+      return const [
+        Conditional(Condition.controlPermanentWithCounter, [Draw(Amount.one, Target.you)]),
+      ];
+    if (l == "look at target opponent's hand") return [HandChoice(ChosenTarget(Filter.opponent), CardPred.any, lookOnly: true)];
+    if (l == 'double the number of +1/+1 counters on each creature you control') return [DoubleCounters(EachTarget(Filter(FilterKind.creature, controller: Controller.you)))];
+    if (l == 'destroy each nonland permanent with mana value equal to the number of charge counters on ~') return const [DestroyNonlandWithManaValue(Amount.counted(AmountKind.eventAmount))];
+    if (l == "create a tapped token that's a copy of target token you control") return [CopyToken(ChosenTarget(Filter(FilterKind.token, controller: Controller.you)), const [], tapped: true)];
+    if (l == 'choose a color. add an amount of mana of that color equal to the number of creature types among non-borg creatures you control' || l == 'choose a color') {
+      return const [AddManaOfChosenColor(Amount.counted(AmountKind.creatureTypesNonBorg))];
+    }
+    if ((m = rx(l, r'lose (\d+) life')) != null) return [LoseLife(Amount.fixed(int.parse(m![1])), Target.you)];
+    if ((m = rx(l, r"~'s base power and toughness become (\d+)/(\d+)")) != null) return [SetBasePT(int.parse(m![1]), int.parse(m[2]))];
+    if ((m = rx(l, r'if this is the second time this ability has resolved this turn, (.+)')) != null) {
+      final fx = effect(m![1]);
+      return fx == null ? null : [Conditional(Condition.resolvedTimes, fx, n: 2)];
+    }
+    if ((m = rx(s, r'if you sacrificed an? (\w+) this way, (.+)')) != null) {
+      final fx = effect(m![2]);
+      return fx == null ? null : [Conditional(Condition.lastHasSubtype, fx, subtype: m[1][0].toUpperCase() + m[1].substring(1))];
+    }
+    if ((m = rx(l, r"if it's a creature, (.+)")) != null) {
+      final fx = effect(m![1]);
+      return fx == null ? null : [Conditional(Condition.lastIsCreature, fx)];
+    }
+    if ((m = rx(l, r"if ~ is the first spell you've cast this game, (.+)")) != null) {
+      final fx = effect(m![1]);
+      return fx == null ? null : [Conditional(Condition.firstSpellThisGame, fx)];
+    }
+    if ((m = rx(l, r"if ~ was kicked, instead for each creature target opponent controls, create a token that's a copy of that creature, except it has (.+)")) != null) {
+      final k = keyword(m![1]);
+      return k == null
+          ? null
+          : [
+              KickedInstead([
+                CopyToken(ChosenTarget(Filter.opponent), [k], eachCreatureOfTarget: true),
+              ]),
+            ];
+    }
+    if ((m = rx(l, r'exile (.+?) until ~ leaves the battlefield')) != null) {
+      final t = target(m![1]);
+      return t == null ? null : [ExileUntilLeaves(t)];
+    }
+    if ((m = rx(l, r'exile the top (\w+) cards? of your library')) != null) {
+      final a = amount(m![1]);
+      return a == null ? null : [ExileTopPlayable(a)];
+    }
+    if ((m = rx(l, r'(?:~|it|he|she) deals (twice )?x damage to (.+?)(?:, where x is (.+))?')) != null) {
+      final t = target(m![2]);
+      final a = m[1].isNotEmpty ? const Amount.counted(AmountKind.twiceX) : (m[3].isEmpty ? const Amount.counted(AmountKind.x) : amountPhrase(m[3]));
+      return t == null || a == null ? null : [Damage(a, t)];
+    }
+    if ((m = rx(s, r'(.+?) gets? \+x/\+(x|0) until end of turn, where x is (.+)')) != null) {
+      final t = target(m![1]);
+      final a = amountPhrase(m[3]);
+      if (t == null || a == null) return null;
+      return [PumpAmount(a, m[2].toLowerCase() == 'x' ? a : Amount.zero, t)];
+    }
+    if ((m = rx(l, r"double ~'s power until end of turn")) != null) return const [PumpAmount(Amount.counted(AmountKind.thisPower), Amount.zero, Target.thisObject)];
+    if ((m = rx(s, r'(.+?) gets? ([+-]\d+)/([+-]\d+) until end of turn and can.t be blocked this turn')) != null) {
+      final t = target(m![1]);
+      return t == null ? null : [Pump(int.parse(m[2]), int.parse(m[3]), t, EffectDuration.endOfTurn), GrantKeyword(Keyword.unblockable, Target.lastTarget, EffectDuration.endOfTurn)];
+    }
+    if ((m = rx(s, r'(.+?) gets? ([+-]\d+)/([+-]\d+) until your next turn')) != null) {
+      final t = target(m![1]);
+      return t == null ? null : [PumpUntilYourNextTurn(int.parse(m[2]), int.parse(m[3]), t)];
+    }
+    if ((m = rx(s, r'attacking (\w+) you control get ([+-]\d+)/([+-]\d+) until end of turn')) != null) {
+      var sub = m![1];
+      if (sub.endsWith('s')) sub = sub.substring(0, sub.length - 1);
+      final f = Filter(FilterKind.creature, controller: Controller.you)
+        ..attacking = true
+        ..subtype = sub[0].toUpperCase() + sub.substring(1);
+      return [Pump(int.parse(m[2]), int.parse(m[3]), EachTarget(f), EffectDuration.endOfTurn)];
+    }
+    if ((m = rx(s, r'put (a|two|three) \+1/\+1 counters? on each (.+)')) != null) {
+      final t = target('each ${m![2]}');
+      final a = amount(m[1]);
+      if (t != null && a != null) return [AddCounters(CounterKind.plusOne, a, t)];
+    }
+    if ((m = rx(l, r'(.+?) each deal damage equal to their power to (.+)')) != null) {
+      final a = target(m![1]), b = target(m[2]);
+      return a == null || b == null ? null : [EachBites(a, b)];
+    }
+    if ((m = rx(l, r"(target creature or spacecraft)'s owner puts it on their choice of the top or bottom of their library")) != null) {
+      return [TopOrBottom(ChosenTarget(Filter(FilterKind.creatureOrSpacecraft)))];
+    }
+    if ((m = rx(l, r'return (.+?) from your graveyard to the battlefield with a (\w+) counter on it')) != null) {
+      final f = graveyardFilter(m![1]);
+      final k = CounterKind.values.where((c) => c.text == m![2]).firstOrNull;
+      return f == null ? null : [ReturnFromGraveyard(f, LibraryDestination.battlefield, counter: k)];
+    }
+    if ((m = rx(l, r'put (target (?:creature )?card) from your graveyard on (top|the bottom) of your library')) != null) {
+      final f = graveyardFilter(m![1]);
+      return f == null ? null : [ReturnFromGraveyard(f, m[2] == 'top' ? LibraryDestination.libraryTop : LibraryDestination.libraryBottom)];
+    }
+    if (l == "put target creature card from a graveyard onto the battlefield under its owner's control") {
+      return [ReturnFromGraveyard(Filter(FilterKind.creatureCardInGraveyard), LibraryDestination.battlefield, underOwnersControl: true)];
+    }
+    if ((m = rx(l, r'(?:you may )?sacrifice (another|a|an) (creature or artifact|artifact or creature|nonland permanent)')) != null) {
+      final kind = m![2] == 'nonland permanent' ? FilterKind.nonlandPermanent : FilterKind.artifactOrCreature;
+      final eff = Sacrifice(Target.you, Filter(kind, controller: Controller.you)..other = m[1] == 'another');
+      return l.startsWith('you may')
+          ? [
+              Optional([eff]),
+            ]
+          : [eff];
+    }
+    return null;
+  }
+
+  /// Whole texts of several sentences that only make sense together.
+  List<Effect>? wholeText(String t) {
+    var l = t.toLowerCase().trim().replaceAll('\n', ' ');
+    while (l.endsWith('.')) {
+      l = l.substring(0, l.length - 1);
+    }
+    l = l.replaceAll(' her.', ' ~.').replaceAll(' on her', ' on ~').replaceAll(' she deals', ' ~ deals');
+    switch (l) {
+      case "look at target opponent's hand. you may choose a nonland card from it. if you do, that player exiles that card, then draws a card":
+        return [HandChoice(ChosenTarget(Filter.opponent), const CardPred(nonland: true), drawAfter: true)];
+      case "look at target opponent's hand. you may exile a nonland card from it. for as long as that card remains exiled, its owner may play it. a spell cast this way costs {2} more to cast":
+        return [HandChoice(ChosenTarget(Filter.opponent), const CardPred(nonland: true), ownerMayPlayForMore: 2)];
+      case 'target opponent exiles cards from the top of their library until they exile a creature card. assimilate that card. they put the rest on the bottom in a random order':
+        return [AssimilateFromLibrary(ChosenTarget(Filter.opponent))];
+      case 'exile the top four cards of your library. put all permanent cards exiled this way onto the battlefield':
+        return const [ExileTopPutPermanents(4)];
+      case 'assimilate a creature card exiled with it. if you can\'t, exile up to one target creature':
+        return [AssimilateExiledOrExile(ChosenTarget(Filter.creature, optional: true))];
+      case 'reveal the top card of your library. you may cast that card without paying its mana cost if that spell\'s mana value is equal to or less than the number of differently named lands you control. if it\'s a land card, you may put it onto the battlefield tapped. if that card is still on top of your library, draw a card':
+        return const [RevealTopCastFree(Amount.counted(AmountKind.differentlyNamedLands))];
+      case 'exile the top five cards of your library. you may cast any number of spells with mana value less than or equal to the number of officers you control from among those cards without paying their mana costs':
+        return const [ExileTopCastFree(5, Amount.counted(AmountKind.subtypeYouControl, subtype: 'Officer'))];
+      case 'search your library and/or graveyard for a basic land card or a card named starship enterprise, reveal it, and put it into your hand. if you search your library this way, shuffle':
+        return const [
+          SearchCard(CardPred(basicLand: true, or: CardPred(names: ['Starship Enterprise'])), LibraryDestination.hand, alsoGraveyard: true),
+        ];
+      case 'search your library for a spacecraft card, put it onto the battlefield with seven charge counters on it, then shuffle':
+        return const [
+          SearchCard(CardPred(types: ['Spacecraft']), LibraryDestination.battlefield, counter: CounterKind.charge, counterAmount: 7),
+        ];
+      case 'put a promotion counter on ~. then if there are three or more promotion counters on ~, remove those counters and ~ deals 2 damage to each opponent':
+        return [
+          const AddCounters(CounterKind.promotion, Amount.one, Target.thisObject),
+          Conditional(
+            Condition.selfCountersAtLeast,
+            [const RemoveCounters(CounterKind.promotion, Target.thisObject), Damage(const Amount.fixed(2), EachTarget(Filter.opponent))],
+            n: 3,
+            counter: CounterKind.promotion,
+          ),
+        ];
+      case 'target creature you control gets +1/+0 until end of turn. then that creature gains menace until end of turn if creatures you control have total power 8 or greater':
+        return [
+          Pump(1, 0, ChosenTarget(Filter(FilterKind.creature, controller: Controller.you)), EffectDuration.endOfTurn),
+          const Conditional(Condition.totalPowerAtLeast, [GrantKeyword(Keyword.menace, Target.lastTarget, EffectDuration.endOfTurn)], n: 8),
+        ];
+      case 'for each opponent, gain control of up to one target creature that player controls with mana value 3 or less until end of turn. untap those creatures. until end of turn, they become warriors in addition to their other types and gain haste':
+        return [
+          GainControl(ChosenTarget(Filter(FilterKind.creature, controller: Controller.opponent)..maxManaValue = 3, optional: true), untilEndOfTurn: true),
+          const Untap(Target.lastTarget),
+          const BecomeType('Warrior', Target.lastTarget),
+          const GrantKeyword(Keyword.haste, Target.lastTarget, EffectDuration.endOfTurn),
+        ];
+      case '~ deals 4 damage to target creature an opponent controls. at the beginning of the next combat this turn, gain control of that creature until end of turn. untap it. it gains haste until end of turn':
+        return [
+          Damage(const Amount.fixed(4), ChosenTarget(Filter(FilterKind.creature, controller: Controller.opponent))),
+          const Delayed(DelayedEventKind.nextCombat, [
+            GainControl(Target.lastTarget, untilEndOfTurn: true),
+            Untap(Target.lastTarget),
+            GrantKeyword(Keyword.haste, Target.lastTarget, EffectDuration.endOfTurn),
+          ]),
+        ];
+      case 'you may exile a card from your hand. if you do, draw a card':
+        return const [
+          ExileFromHand(),
+          IfDidPrevious([Draw(Amount.one, Target.you)]),
+        ];
+      case 'all artifacts and creatures phase out. create a 0/1 white human creature token with "permanents can\'t phase in."':
+      case 'all artifacts and creatures phase out. create a 0/1 white human creature token with "permanents can\'t phase in.':
+        return [
+          PhaseOut(EachTarget(Filter(FilterKind.artifactOrCreature))),
+          CreateTokens(TokenSpec(name: 'Human', power: 0, toughness: 1, colors: [ManaColor.white], subtypes: ['Human'], text: "Permanents can't phase in."), Amount.one, Target.you),
+        ];
+      case 'put a quest counter on ~. create a 1/1 colorless borg artifact creature token. if ~ has six or more quest counters on it, create two of those tokens instead':
+        return [
+          const AddCounters(CounterKind.quest, Amount.one, Target.thisObject),
+          Conditional(
+            Condition.selfCountersAtLeast,
+            [CreateTokens(_borg, const Amount.fixed(2), Target.you)],
+            otherwise: [CreateTokens(_borg, Amount.one, Target.you)],
+            n: 6,
+            counter: CounterKind.quest,
+          ),
+        ];
+      case 'put a quest counter on ~. put a +1/+1 counter on that creature. if ~ has five or more quest counters on it, instead put two +1/+1 counters on that creature':
+        return const [
+          AddCounters(CounterKind.quest, Amount.one, Target.thisObject),
+          Conditional(
+            Condition.selfCountersAtLeast,
+            [AddCounters(CounterKind.plusOne, Amount.fixed(2), Target.triggering)],
+            otherwise: [AddCounters(CounterKind.plusOne, Amount.one, Target.triggering)],
+            n: 5,
+            counter: CounterKind.quest,
+          ),
+        ];
+      case 'put a +1/+1 counter on each creature you control that entered this turn. if you put two or more +1/+1 counters on creatures this way, draw a card':
+        return [
+          AddCounters(CounterKind.plusOne, Amount.one, EachTarget(Filter(FilterKind.creature, controller: Controller.you)..enteredThisTurn = true)),
+          const Conditional(Condition.countedAtLeast, [Draw(Amount.one, Target.you)], n: 2),
+        ];
+      case 'destroy all creatures. create x 1/1 colorless borg artifact creature tokens, where x is the number of nonartifact creatures destroyed this way':
+        return [Destroy(EachTarget(Filter.creature)), CreateTokens(_borg, const Amount.counted(AmountKind.countedThisWay), Target.you)];
+      case 'mill two cards, then put a +1/+1 counter on ~ for each artifact and/or creature card in your graveyard':
+        return const [Mill(2, Target.you), AddCounters(CounterKind.plusOne, Amount.counted(AmountKind.artifactOrCreatureCardsInGraveyard), Target.thisObject)];
+      case 'draw a card. then discard a card unless you control five or more differently named lands':
+        return const [
+          Draw(Amount.one, Target.you),
+          Conditional(Condition.differentLandsAtLeast, [Discard(1, Target.you)], n: 5, negate: true),
+        ];
+      case 'put a +1/+1 counter on up to one other target creature and two charge counters on up to one target spacecraft':
+        return [
+          AddCounters(CounterKind.plusOne, Amount.one, ChosenTarget(Filter.creature..other = true, optional: true)),
+          AddCounters(CounterKind.charge, const Amount.fixed(2), ChosenTarget(Filter(FilterKind.spacecraft), optional: true)),
+        ];
+      case 'exile the top x cards of your library, where x is the number of opponents you attacked this turn. until the end of your next turn, you may play those cards':
+        return const [ExileTopPlayable(Amount.counted(AmountKind.opponentsAttacked), untilNextTurn: true)];
+      case 'draw x cards, then you may put up to x land cards from your hand onto the battlefield tapped, where x is the number of other creatures you control with a communicator attached to them':
+        return const [Draw(Amount.counted(AmountKind.otherCreaturesWithCommunicator), Target.you), PutLandsFromHand(Amount.counted(AmountKind.otherCreaturesWithCommunicator))];
+      case 'shuffle your library, then exile cards from the top of your library until you exile a nonland card. that nonland card gains "exile a card from your hand: create a copy of ~. you may cast the copy. activate only during your turn and only if ~ is exiled."':
+      case 'shuffle your library, then exile cards from the top of your library until you exile a nonland card. that nonland card gains "exile a card from your hand: create a copy of ~. you may cast the copy. activate only during your turn and only if ~ is exiled.':
+        return const [QStackTheDeck()];
+    }
+    return null;
+  }
+
+  /// Whole ability lines with their own shape (lowercase, "~" for the card's name).
+  List<Ability>? specialLine(String l) {
+    switch (l) {
+      case 'whenever ~ becomes tapped, until end of turn, if one or more counters would be put on a permanent you control, that many plus one of each of those kinds of counters are put on that permanent instead':
+        return const [
+          Triggered(SimpleTrigger.becomesTapped, [ExtraCountersThisTurn()]),
+        ];
+      case "at the beginning of your end step, create a 1/1 red officer creature token for each dilemma you've faced this turn":
+        return [
+          Triggered(SimpleTrigger.endStep, [CreateTokens(_officer, const Amount.counted(AmountKind.dilemmasThisTurn), Target.you)]),
+        ];
+      case "artifacts creatures you control have vigilance":
+        return [StaticAbilityEntry(GrantKeywordStatic(Filter(FilterKind.artifactCreature, controller: Controller.you), Keyword.vigilance))];
+      case 'all tribbles get +1/+0 and are goaded':
+        final f = Filter(FilterKind.creature)..subtype = 'Tribble';
+        return [StaticAbilityEntry(Anthem(f, 1, 0)), StaticAbilityEntry(GrantKeywordStatic(f, Keyword(KeywordKind.mustAttack)))];
+      case 'spacecraft creatures you control get +3/+3':
+        return [StaticAbilityEntry(Anthem(Filter(FilterKind.creature, controller: Controller.you)..subtype = 'Spacecraft', 3, 3))];
+      case 'whenever ~ or another nontoken legendary permanent you control enters, create a food token':
+        return [
+          Triggered(SimpleTrigger.enters, [CreateTokens(TokenSpec.food, Amount.one, Target.you)]),
+          Triggered(
+            PermanentEntersTrigger(
+              Filter(FilterKind.permanent, controller: Controller.you)
+                ..other = true
+                ..nontoken = true
+                ..legendary = true,
+            ),
+            [CreateTokens(TokenSpec.food, Amount.one, Target.you)],
+          ),
+        ];
+      case 'whenever another historic permanent you control with mana value 3 or greater enters, draw a card':
+        return [
+          Triggered(
+            PermanentEntersTrigger(
+              Filter(FilterKind.permanent, controller: Controller.you)
+                ..other = true
+                ..historic = true
+                ..minManaValue = 3,
+            ),
+            const [Draw(Amount.one, Target.you)],
+          ),
+        ];
+      case 'whenever a creature you control enters, put a quest counter on ~. put a +1/+1 counter on that creature. if ~ has five or more quest counters on it, instead put two +1/+1 counters on that creature':
+        return [
+          Triggered(
+            PermanentEntersTrigger(Filter(FilterKind.creature, controller: Controller.you)),
+            wholeText('put a quest counter on ~. put a +1/+1 counter on that creature. if ~ has five or more quest counters on it, instead put two +1/+1 counters on that creature')!,
+          ),
+        ];
+      case 'whenever a nontoken artifact you control enters, put a quest counter on ~. create a 1/1 colorless borg artifact creature token. if ~ has six or more quest counters on it, create two of those tokens instead':
+        return [
+          Triggered(
+            PermanentEntersTrigger(Filter(FilterKind.artifact, controller: Controller.you)..nontoken = true),
+            wholeText('put a quest counter on ~. create a 1/1 colorless borg artifact creature token. if ~ has six or more quest counters on it, create two of those tokens instead')!,
+          ),
+        ];
+      case 'at the beginning of combat on your turn, if you\'ve cast a noncreature spell this turn, create a token that\'s a copy of target creature you control, except it isn\'t legendary. it gains haste until end of turn. sacrifice it at the beginning of the next end step':
+        return [
+          Triggered(SimpleTrigger.beginCombat, [
+            CopyToken(ChosenTarget(Filter(FilterKind.creature, controller: Controller.you)), const [], nonLegendary: true, hasteUntilEndOfTurn: true, sacrificeAtEnd: true),
+          ], condition: const TriggerCondition(TriggerConditionKind.castNoncreatureThisTurn)),
+        ];
+      case 'at the beginning of combat on each player\'s turn, that player may draw a card. if they do, they can\'t attack this turn and you put a peace counter on ~':
+        return const [
+          Triggered(SimpleTrigger.eachBeginCombat, [PeaceOffer()]),
+        ];
+      case 'equipped creature gets +2/+2 and has "whenever ~ attacks, look at the top five cards of your library. you may put a klingon or warrior creature card from among them onto the battlefield. put the rest on the bottom of your library in a random order."':
+        return const [
+          StaticAbilityEntry(AttachedGets(2, 2)),
+          Triggered(SimpleTrigger.equippedAttacks, [
+            LookAtTop(
+              Amount.fixed(5),
+              CardPred(types: ['Creature'], subtypes: ['Klingon', 'Warrior']),
+              destination: LibraryDestination.battlefield,
+            ),
+          ]),
+        ];
+      case 'equipped creature has "whenever ~ attacks, draw x cards, then you may put up to x land cards from your hand onto the battlefield tapped, where x is the number of other creatures you control with a communicator attached to them."':
+        return const [
+          Triggered(SimpleTrigger.equippedAttacks, [
+            Draw(Amount.counted(AmountKind.otherCreaturesWithCommunicator), Target.you),
+            PutLandsFromHand(Amount.counted(AmountKind.otherCreaturesWithCommunicator)),
+          ]),
+        ];
+      case 'when you cast ~, copy it':
+        return const [
+          Triggered(SimpleTrigger.castThis, [CopyThisSpell()]),
+        ];
+      case 'as ~ enters, choose a number between 0 and 10':
+        return const [ChooseNumberOnEnter(0, 10)];
+      case "you may have ~ enter as a copy of any artifact or creature on the battlefield, except it isn't legendary. if you do, it enters with additional counters on it equal to the same number and kinds of counters the copied permanent has on it":
+        return [EnterAsCopy(Filter(FilterKind.artifactOrCreature))];
+      case '~ costs {1} less to cast if it targets an attacking creature':
+        return const [CostReductionIfTargetsAttacker(1)];
+      case "{6}: create a tapped planet land token named new planet with \"{t}: add one mana of any color.\" activate only as a sorcery":
+        return [
+          Activated(ActivationCost(mana: ManaCost(generic: 6)), [
+            CreateTokens(TokenSpec(name: 'New Planet', subtypes: ['Planet'], isCreature: false, isLand: true, text: '{T}: Add one mana of any color.'), Amount.one, Target.you, tapped: true),
+          ], sorcerySpeed: true),
+        ];
+    }
+    return null;
+  }
+
+  /// "a Plains card or nonland permanent card with mana value 3 or less", "a noncreature, nonland
+  /// card", "a Klingon or Warrior creature card", "one of them".
+  CardPred? cardPred(String textIn) {
+    var t = textIn.toLowerCase().trim();
+    if (t == 'one of them' || t == 'a card') return CardPred.any;
+    final both = rx(t, r'(.+? card) or (.+ card(?: with mana value \d+ or less)?)');
+    if (both != null) {
+      final a = cardPred(both[1]), b = cardPred(both[2]);
+      if (a == null || b == null) return null;
+      return CardPred(types: a.types, notTypes: a.notTypes, subtypes: a.subtypes, maxManaValue: a.maxManaValue, permanent: a.permanent, nonland: a.nonland, basicLand: a.basicLand, or: b);
+    }
+    int? maxMv;
+    final mv = rx(t, r'(.+?) with mana value (\d+) or less');
+    if (mv != null) {
+      t = mv[1];
+      maxMv = int.parse(mv[2]);
+    }
+    t = t.replaceFirst(RegExp(r'^(a|an) '), '').replaceFirst(RegExp(r' cards?$'), '');
+    final types = <String>[], notTypes = <String>[], subtypes = <String>[];
+    var permanent = false, nonland = false;
+    final words = t.replaceAll(',', '').split(' ').where((w) => w.isNotEmpty).toList();
+    for (var i = 0; i < words.length; i++) {
+      final w = words[i];
+      switch (w) {
+        case 'permanent':
+          permanent = true;
+        case 'nonland':
+          nonland = true;
+        case 'noncreature':
+          notTypes.add('Creature');
+        case 'land':
+        case 'creature':
+        case 'artifact':
+        case 'enchantment':
+        case 'instant':
+        case 'sorcery':
+          types.add(w[0].toUpperCase() + w.substring(1));
+        case 'plains':
+        case 'island':
+        case 'swamp':
+        case 'mountain':
+        case 'forest':
+        case 'spacecraft':
+          types.add(w[0].toUpperCase() + w.substring(1));
+        case 'or':
+          break;
+        default:
+          // "klingon or warrior": creature types, any of them.
+          subtypes.add(w[0].toUpperCase() + w.substring(1));
+      }
+    }
+    return CardPred(types: types, notTypes: notTypes, subtypes: subtypes, maxManaValue: maxMv, permanent: permanent, nonland: nonland);
+  }
+}
+
+/// Collects "Look at the top N cards of your library. ... from among them ... . Put the rest ..."
+class _LookBuilder {
+  _LookBuilder(this.n);
+  final Amount n;
+  CardPred pick = CardPred.any;
+  var optional = false;
+  var destination = LibraryDestination.hand;
+  var rest = RestDestination.bottomRandom;
+
+  bool absorb(String l, _Parser p) {
+    List<String>? m;
+    if ((m = rx(l, r'(?:you may )?(?:reveal )?(.+?) from among them and put it into your hand')) != null) {
+      final pred = p.cardPred(m![1]);
+      if (pred == null) return false;
+      pick = pred;
+      optional = l.startsWith('you may');
+      destination = LibraryDestination.hand;
+      return true;
+    }
+    if ((m = rx(l, r'put one of them into your hand and the rest on the bottom of your library in (?:a random|any) order')) != null) {
+      pick = CardPred.any;
+      optional = false;
+      rest = RestDestination.bottomRandom;
+      return true;
+    }
+    if ((m = rx(l, r'(?:you may )?put (.+?) from among them onto the battlefield( tapped)?(?: and the rest into your graveyard)?')) != null) {
+      final pred = p.cardPred(m![1]);
+      if (pred == null) return false;
+      pick = pred;
+      optional = l.startsWith('you may');
+      destination = m[2].isEmpty ? LibraryDestination.battlefield : LibraryDestination.battlefieldTapped;
+      if (l.endsWith('the rest into your graveyard')) rest = RestDestination.graveyard;
+      return true;
+    }
+    if ((m = rx(l, r'put the rest on the bottom(?: of your library)? in (a random|any) order')) != null) {
+      rest = m![1] == 'any' ? RestDestination.bottom : RestDestination.bottomRandom;
+      return true;
+    }
+    return false;
+  }
+
+  LookAtTop build() => LookAtTop(n, pick, destination: destination, rest: rest, optional: optional);
 }

@@ -165,7 +165,7 @@ class _GameScreenState extends State<GameScreen> {
       kickable = game.canPay(c, me);
     }
     final modal = parsed.spellEffects.any((e) => e is Modal);
-    if (kickable || modal || canCycle(id) || !game.canCast(id, me)) {
+    if (kickable || modal || canCycle(id) || zoneAbilities(id).isNotEmpty || !game.canCast(id, me)) {
       showCastMenu(id);
     } else {
       beginCast(id, kicked: false, mode: null);
@@ -199,19 +199,27 @@ class _GameScreenState extends State<GameScreen> {
     }
     final cyc = parsed.cycling;
     if (cyc != null && canCycle(id)) items.add(_sheetButton('${cyc.landType == null ? 'Cycling' : 'Landcycling'} ${cyc.cost}', () => perform(CycleAction(id))));
+    for (final (i, a) in zoneAbilities(id)) {
+      items.add(_sheetButton('${costText(a.cost)}: ${game.describeEffects(a.effects)}', () => beginActivate(id, i, a.cost, a.effects), color: LCARS.blue));
+    }
     items.add(_sheetButton('Inspect', () => inspect(id), color: LCARS.lavender));
     _showSheet(card.name, items);
   }
 
   Widget _sheetButton(String label, VoidCallback onTap, {Color color = LCARS.orange, bool enabled = true}) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: LcarsButton(label, color: color, height: 40, onPressed: enabled
-            ? () {
-                Navigator.pop(context);
-                onTap();
-              }
-            : null),
-      );
+    padding: const EdgeInsets.only(bottom: 6),
+    child: LcarsButton(
+      label,
+      color: color,
+      height: 40,
+      onPressed: enabled
+          ? () {
+              Navigator.pop(context);
+              onTap();
+            }
+          : null,
+    ),
+  );
 
   /// Pick between `min` and `max` items: card faces (returned as object ids) or text labels
   /// (returned as indices).
@@ -225,50 +233,65 @@ class _GameScreenState extends State<GameScreen> {
         builder: (context, setSheet) {
           final n = cards.isNotEmpty ? cards.length : labels.length;
           void toggle(int i) => setSheet(() {
-                if (!chosen.remove(i)) {
-                  if (max == 1) chosen.clear();
-                  if (chosen.length < max) chosen.add(i);
-                }
-              });
+            if (!chosen.remove(i)) {
+              if (max == 1) chosen.clear();
+              if (chosen.length < max) chosen.add(i);
+            }
+          });
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(12),
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                LcarsHeader(title, color: LCARS.gold),
-                const SizedBox(height: 6),
-                if (cards.isNotEmpty)
-                  SizedBox(
-                    height: 200,
-                    child: ListView(scrollDirection: Axis.horizontal, children: [
-                      for (var i = 0; i < n; i++)
-                        GestureDetector(
-                          onTap: () => toggle(i),
-                          onLongPress: () => inspect(cards[i]),
-                          child: Container(
-                            margin: const EdgeInsets.only(right: 6),
-                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: chosen.contains(i) ? LCARS.gold : Colors.transparent, width: 3)),
-                            child: CardFace(card: game.card(cards[i]), width: 130),
-                          ),
-                        ),
-                    ]),
-                  )
-                else
-                  for (var i = 0; i < n; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: LcarsButton(labels[i], color: LCARS.lavender, fill: chosen.contains(i), height: 36, onPressed: () => toggle(i)),
-                    ),
-                const SizedBox(height: 8),
-                Text(min == 0 ? 'Choose up to $max (or none)' : (min == max ? 'Choose $min' : 'Choose $min to $max'), style: LCARS.small.copyWith(color: LCARS.gray)),
-                const SizedBox(height: 6),
-                LcarsButton('Done', color: LCARS.gold, height: 38, onPressed: chosen.length >= min && chosen.length <= max
-                    ? () {
-                        Navigator.pop(sheetContext);
-                        final picks = chosen.toList()..sort();
-                        onDone(cards.isNotEmpty ? [for (final i in picks) cards[i]] : picks);
-                      }
-                    : null),
-              ]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  LcarsHeader(title, color: LCARS.gold),
+                  const SizedBox(height: 6),
+                  if (cards.isNotEmpty)
+                    SizedBox(
+                      height: 200,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          for (var i = 0; i < n; i++)
+                            GestureDetector(
+                              onTap: () => toggle(i),
+                              onLongPress: () => inspect(cards[i]),
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: chosen.contains(i) ? LCARS.gold : Colors.transparent, width: 3),
+                                ),
+                                child: CardFace(card: game.card(cards[i]), width: 130),
+                              ),
+                            ),
+                        ],
+                      ),
+                    )
+                  else
+                    for (var i = 0; i < n; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: LcarsButton(labels[i], color: LCARS.lavender, fill: chosen.contains(i), height: 36, onPressed: () => toggle(i)),
+                      ),
+                  const SizedBox(height: 8),
+                  Text(min == 0 ? 'Choose up to $max (or none)' : (min == max ? 'Choose $min' : 'Choose $min to $max'), style: LCARS.small.copyWith(color: LCARS.gray)),
+                  const SizedBox(height: 6),
+                  LcarsButton(
+                    'Done',
+                    color: LCARS.gold,
+                    height: 38,
+                    onPressed: chosen.length >= min && chosen.length <= max
+                        ? () {
+                            Navigator.pop(sheetContext);
+                            final picks = chosen.toList()..sort();
+                            onDone(cards.isNotEmpty ? [for (final i in picks) cards[i]] : picks);
+                          }
+                        : null,
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -298,7 +321,11 @@ class _GameScreenState extends State<GameScreen> {
     } else {
       setState(() {
         selectedHandCard = id;
-        interaction = Targeting(requirements: reqs, chosen: const [], purpose: CastPurpose(id, kicked: kicked, mode: mode));
+        interaction = Targeting(
+          requirements: reqs,
+          chosen: const [],
+          purpose: CastPurpose(id, kicked: kicked, mode: mode),
+        );
       });
     }
   }
@@ -386,12 +413,13 @@ class _GameScreenState extends State<GameScreen> {
     if (obj == null || parsed == null) return;
     final c = game.characteristics(id);
     final items = <Widget>[];
-    for (var i = 0; i < parsed.abilities.length; i++) {
-      final a = parsed.abilities[i];
+    final all = game.abilitiesIn(obj);
+    for (var i = 0; i < all.length; i++) {
+      final a = all[i];
       if (a is! Activated) continue;
       if (a.effects.length == 1 && a.effects[0] is AddMana) continue;
       final cost = a.cost;
-      final usable = (!a.sorcerySpeed || state.phase.isMain) && !(cost.tap && obj.tapped) && game.canPay(cost.mana, me) && !(cost.oncePerTurn && obj.activatedThisTurn.contains(i));
+      final usable = game.activationProblem(id, i, me) == null;
       items.add(_sheetButton('${costText(cost)}: ${game.describeEffects(a.effects)}', () => beginActivate(id, i, cost, a.effects), enabled: usable));
     }
     if (c.isSpacecraft && parsed.has(KeywordKind.station) && state.phase.isMain) {
@@ -416,6 +444,16 @@ class _GameScreenState extends State<GameScreen> {
     if (cost.sacrifice != null) parts.add('Sacrifice a permanent');
     if (cost.payLife > 0) parts.add('Pay ${cost.payLife} life');
     if (cost.discard > 0) parts.add('Discard');
+    if (cost.tapOthers > 0) parts.add('Tap ${cost.tapOthers} untapped ${cost.tapOthersFilter?.subtype != null ? '${cost.tapOthersFilter!.subtype}s' : 'artifacts/creatures'}');
+    if (cost.removeCounters > 0) parts.add('Remove ${cost.removeCounters} counters');
+    switch (cost.zone) {
+      case AbilityZone.battlefield:
+        break;
+      case AbilityZone.hand:
+        parts.add('Discard this');
+      case AbilityZone.graveyard:
+        parts.add(cost.exileSelf ? 'Exile this from graveyard' : 'Put this on the bottom of your library');
+    }
     return parts.isEmpty ? 'Free' : parts.join(', ');
   }
 
@@ -454,8 +492,7 @@ class _GameScreenState extends State<GameScreen> {
       case ActivatePurpose p:
         ObjectID? sacrifice;
         final obj = state.objects[p.object];
-        final parsed = obj == null ? null : game.parsedOf(obj);
-        final a = parsed?.abilities[p.index];
+        final a = obj == null ? null : game.abilitiesIn(obj).elementAtOrNull(p.index);
         if (a is Activated && a.cost.sacrifice != null) sacrifice = _cheapestMatching(a.cost.sacrifice!, p.object);
         perform(ActivateAbilityAction(p.object, p.index, targets: t.chosen, sacrifice: sacrifice));
     }
@@ -499,20 +536,25 @@ class _GameScreenState extends State<GameScreen> {
         builder: (_, controller) => SingleChildScrollView(
           controller: controller,
           padding: const EdgeInsets.all(12),
-          child: Column(children: [
-            if (card != null) CardDetailBody(card: card, db: game.db) else TokenFace(token: obj.token, width: 240),
-            if (obj.zone == Zone.battlefield)
-              LcarsPanel(
-                title: 'On the battlefield',
-                color: LCARS.gold,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  if (c.isCreature) Text('${c.power}/${c.toughness}, ${obj.damage} damage marked', style: LCARS.body),
-                  if (c.keywords.isNotEmpty) Text((c.keywords.map((k) => k.toString()).toList()..sort()).join(', '), style: LCARS.label.copyWith(color: LCARS.lavender)),
-                  if (obj.counters.isNotEmpty) Text('${obj.counters.entries.map((e) => '${e.value} ${e.key.text}').join(', ')} counters', style: LCARS.label.copyWith(color: LCARS.blue)),
-                  if (obj.tapped) Text('Tapped', style: LCARS.label.copyWith(color: LCARS.gray)),
-                ]),
-              ),
-          ]),
+          child: Column(
+            children: [
+              if (card != null) CardDetailBody(card: card, db: game.db) else TokenFace(token: obj.token, width: 240),
+              if (obj.zone == Zone.battlefield)
+                LcarsPanel(
+                  title: 'On the battlefield',
+                  color: LCARS.gold,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (c.isCreature) Text('${c.power}/${c.toughness}, ${obj.damage} damage marked', style: LCARS.body),
+                      if (c.keywords.isNotEmpty) Text((c.keywords.map((k) => k.toString()).toList()..sort()).join(', '), style: LCARS.label.copyWith(color: LCARS.lavender)),
+                      if (obj.counters.isNotEmpty) Text('${obj.counters.entries.map((e) => '${e.value} ${e.key.text}').join(', ')} counters', style: LCARS.label.copyWith(color: LCARS.blue)),
+                      if (obj.tapped) Text('Tapped', style: LCARS.label.copyWith(color: LCARS.gray)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -529,51 +571,78 @@ class _GameScreenState extends State<GameScreen> {
         initialChildSize: 0.6,
         builder: (_, controller) => Padding(
           padding: const EdgeInsets.all(12),
-          child: Column(children: [
-            LcarsHeader("${state.players[p].name}'s graveyard", color: LCARS.violet),
-            Expanded(
-              child: ids.isEmpty
-                  ? Center(child: Text('Empty', style: LCARS.body.copyWith(color: LCARS.gray)))
-                  : GridView.builder(
-                      controller: controller,
-                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 100, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 1 / (cardAspect + 0.4)),
-                      itemCount: ids.length,
-                      itemBuilder: (_, i) {
-                        final id = ids[i];
-                        final card = game.card(id);
-                        final beam = card == null ? null : game.db.parsed(card).beamMeUp;
-                        final canBeam = p == me && beam != null && state.activePlayer == me && state.phase.isMain && game.canPay(beam, me) && state.pending == null;
-                        // While a spell or ability is choosing targets, a card here that is a
-                        // legal target is picked by tapping it, like a permanent on the table.
-                        final targetable = (interaction is Targeting || interaction is DecisionTargets) && isCandidate(id);
-                        return Column(children: [
-                          Expanded(
-                            child: LayoutBuilder(
-                              builder: (_, box) => GestureDetector(
-                                onTap: () {
-                                  if (!targetable) return inspect(id);
-                                  Navigator.pop(context);
-                                  tapPermanent(id);
-                                },
-                                onLongPress: () => inspect(id),
-                                child: Container(
-                                  decoration: targetable ? BoxDecoration(borderRadius: BorderRadius.circular(6), border: Border.all(color: LCARS.gold, width: 3)) : null,
-                                  child: CardFace(card: card, width: box.maxWidth),
+          child: Column(
+            children: [
+              LcarsHeader("${state.players[p].name}'s graveyard", color: LCARS.violet),
+              Expanded(
+                child: ids.isEmpty
+                    ? Center(
+                        child: Text('Empty', style: LCARS.body.copyWith(color: LCARS.gray)),
+                      )
+                    : GridView.builder(
+                        controller: controller,
+                        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 100, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 1 / (cardAspect + 0.4)),
+                        itemCount: ids.length,
+                        itemBuilder: (_, i) {
+                          final id = ids[i];
+                          final card = game.card(id);
+                          final beam = card == null ? null : game.db.parsed(card).beamMeUp;
+                          final canBeam = p == me && beam != null && state.activePlayer == me && state.phase.isMain && game.canPay(beam, me) && state.pending == null;
+                          // While a spell or ability is choosing targets, a card here that is a
+                          // legal target is picked by tapping it, like a permanent on the table.
+                          final targetable = (interaction is Targeting || interaction is DecisionTargets) && isCandidate(id);
+                          return Column(
+                            children: [
+                              Expanded(
+                                child: LayoutBuilder(
+                                  builder: (_, box) => GestureDetector(
+                                    onTap: () {
+                                      if (!targetable) return inspect(id);
+                                      Navigator.pop(context);
+                                      tapPermanent(id);
+                                    },
+                                    onLongPress: () => inspect(id),
+                                    child: Container(
+                                      decoration: targetable
+                                          ? BoxDecoration(
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: LCARS.gold, width: 3),
+                                            )
+                                          : null,
+                                      child: CardFace(card: card, width: box.maxWidth),
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                          if (targetable) Text('TAP TO TARGET', style: LCARS.font(9, color: LCARS.gold)),
-                          if (canBeam)
-                            LcarsButton('Beam up $beam', height: 26, color: LCARS.blue, onPressed: () {
-                              Navigator.pop(context);
-                              setState(() => interaction = BeamingUp(id));
-                            }),
-                        ]);
-                      },
-                    ),
-            ),
-          ]),
+                              if (targetable) Text('TAP TO TARGET', style: LCARS.font(9, color: LCARS.gold)),
+                              if (canBeam)
+                                LcarsButton(
+                                  'Beam up $beam',
+                                  height: 26,
+                                  color: LCARS.blue,
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    setState(() => interaction = BeamingUp(id));
+                                  },
+                                ),
+                              if (p == me && interaction is Idle)
+                                for (final (index, a) in zoneAbilities(id))
+                                  LcarsButton(
+                                    costText(a.cost).replaceAll(', Exile this from graveyard', '').replaceAll(', Put this on the bottom of your library', ''),
+                                    height: 26,
+                                    color: LCARS.blue,
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                      beginActivate(id, index, a.cost, a.effects);
+                                    },
+                                  ),
+                            ],
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -595,20 +664,28 @@ class _GameScreenState extends State<GameScreen> {
           }
           return Padding(
             padding: const EdgeInsets.all(12),
-            child: Column(children: [
-              const LcarsHeader("Captain's log", color: LCARS.lavender),
-              Expanded(
-                child: ListView.builder(
-                  controller: controller,
-                  reverse: true,
-                  itemCount: lines.length,
-                  itemBuilder: (_, i) {
-                    final (t, c) = lines[lines.length - 1 - i];
-                    return Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text(t, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c)));
-                  },
+            child: Column(
+              children: [
+                const LcarsHeader("Captain's log", color: LCARS.lavender),
+                Expanded(
+                  child: ListView.builder(
+                    controller: controller,
+                    reverse: true,
+                    itemCount: lines.length,
+                    itemBuilder: (_, i) {
+                      final (t, c) = lines[lines.length - 1 - i];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          t,
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c),
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
           );
         },
       ),
@@ -618,7 +695,13 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> confirmConcede() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (c) => AlertDialog(title: const Text('Concede the game?'), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')), TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Concede'))]),
+      builder: (c) => AlertDialog(
+        title: const Text('Concede the game?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Concede')),
+        ],
+      ),
     );
     if (ok == true) session!.concede();
   }
@@ -668,7 +751,7 @@ class _GameScreenState extends State<GameScreen> {
 
   bool isDimmed(ObjectID id) => interaction is! Idle && interaction is! PickingCards && !isCandidate(id) && !isSelected(id);
 
-  bool playable(ObjectID id) => interaction is Idle && (game.canPlayLand(id, me) || game.canCast(id, me) || canCycle(id));
+  bool playable(ObjectID id) => interaction is Idle && (game.canPlayLand(id, me) || game.canCast(id, me) || canCycle(id) || zoneAbilities(id).isNotEmpty);
 
   // MARK: Build
 
@@ -682,22 +765,32 @@ class _GameScreenState extends State<GameScreen> {
         leading: IconButton(icon: const Icon(Icons.chevron_left), onPressed: leave),
         title: Text('Turn ${state.turn} · ${state.phase.label}'.toUpperCase(), style: LCARS.font(14, color: LCARS.peach)),
         actions: [
-          IconButton(icon: const Icon(Icons.list_alt, color: LCARS.lavender), onPressed: showLog),
-          IconButton(icon: const Icon(Icons.flag, color: LCARS.red), onPressed: confirmConcede),
+          IconButton(
+            icon: const Icon(Icons.list_alt, color: LCARS.lavender),
+            onPressed: showLog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.flag, color: LCARS.red),
+            onPressed: confirmConcede,
+          ),
         ],
       ),
       body: SafeArea(
-        child: Stack(children: [
-          Column(children: [
-            playerStrip(them, top: true),
-            Expanded(flex: 5, child: battlefield(them, top: true)),
-            controlBar(),
-            Expanded(flex: 5, child: battlefield(me, top: false)),
-            playerStrip(me, top: false),
-            hand(),
-          ]),
-          if (state.isOver) Positioned.fill(child: gameOverOverlay()),
-        ]),
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                playerStrip(them, top: true),
+                Expanded(flex: 5, child: battlefield(them, top: true)),
+                controlBar(),
+                Expanded(flex: 5, child: battlefield(me, top: false)),
+                playerStrip(me, top: false),
+                hand(),
+              ],
+            ),
+            if (state.isOver) Positioned.fill(child: gameOverOverlay()),
+          ],
+        ),
       ),
     );
   }
@@ -708,23 +801,41 @@ class _GameScreenState extends State<GameScreen> {
     final life = ps.life;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      child: Row(children: [
-        Container(width: 30, height: 20, decoration: BoxDecoration(color: active ? LCARS.orange : LCARS.gray, borderRadius: BorderRadius.circular(10))),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text(ps.name.toUpperCase(), style: LCARS.font(16, color: active ? LCARS.orange : LCARS.peach), maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(top ? 'opponent' : (session!.mode == SessionMode.hotseat ? 'your seat' : 'you'), style: LCARS.small.copyWith(color: LCARS.gray)),
-          ]),
-        ),
-        LcarsReadout(label: 'life', value: '$life', color: lifeFlash == p ? LCARS.alert : (life <= 5 ? LCARS.red : LCARS.peach)),
-        const SizedBox(width: 10),
-        LcarsReadout(label: 'hand', value: '${ps.hand.length}', color: LCARS.blue),
-        const SizedBox(width: 10),
-        LcarsReadout(label: 'library', value: '${ps.library.length}', color: LCARS.lavender),
-        const SizedBox(width: 10),
-        GestureDetector(onTap: () => showGraveyard(p), child: LcarsReadout(label: 'grave', value: '${ps.graveyard.length}', color: LCARS.violet)),
-      ]),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 20,
+            decoration: BoxDecoration(color: active ? LCARS.orange : LCARS.gray, borderRadius: BorderRadius.circular(10)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  ps.name.toUpperCase(),
+                  style: LCARS.font(16, color: active ? LCARS.orange : LCARS.peach),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(top ? 'opponent' : (session!.mode == SessionMode.hotseat ? 'your seat' : 'you'), style: LCARS.small.copyWith(color: LCARS.gray)),
+              ],
+            ),
+          ),
+          LcarsReadout(label: 'life', value: '$life', color: lifeFlash == p ? LCARS.alert : (life <= 5 ? LCARS.red : LCARS.peach)),
+          const SizedBox(width: 10),
+          LcarsReadout(label: 'hand', value: '${ps.hand.length}', color: LCARS.blue),
+          const SizedBox(width: 10),
+          LcarsReadout(label: 'library', value: '${ps.library.length}', color: LCARS.lavender),
+          const SizedBox(width: 10),
+          GestureDetector(
+            onTap: () => showGraveyard(p),
+            child: LcarsReadout(label: 'grave', value: '${ps.graveyard.length}', color: LCARS.violet),
+          ),
+        ],
+      ),
     );
   }
 
@@ -733,27 +844,71 @@ class _GameScreenState extends State<GameScreen> {
     final lands = perms.where((o) => game.characteristics(o.id).isLand && o.attachedTo == null).toList();
     final others = perms.where((o) => !game.characteristics(o.id).isLand).toList();
     Widget landRow() => SizedBox(
-          height: 48,
-          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 6), children: [
-            if (lands.isEmpty) Center(child: Text('no lands', style: LCARS.small.copyWith(color: LCARS.gray))),
-            for (final o in lands) Padding(padding: const EdgeInsets.only(right: 3), child: PermanentView(session: session!, objectID: o.id, width: 30, highlighted: isCandidate(o.id), selected: isSelected(o.id), onTap: () => tapPermanent(o.id), onLongPress: () => inspect(o.id))),
-          ]),
-        );
-    Widget mainRow() => Expanded(
-          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 6), children: [
-            if (others.isEmpty) Center(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text(top ? 'no permanents' : 'your battlefield', style: LCARS.small.copyWith(color: LCARS.gray)))),
-            for (final o in others)
-              Padding(
-                padding: const EdgeInsets.only(right: 5),
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  LayoutBuilder(builder: (_, box) {
-                    final w = (box.maxHeight / cardAspect).clamp(44.0, 80.0);
-                    return PermanentView(session: session!, objectID: o.id, width: w, highlighted: isCandidate(o.id), selected: isSelected(o.id), dimmed: isDimmed(o.id), onTap: () => tapPermanent(o.id), onLongPress: () => inspect(o.id), tag: blockTag(o.id));
-                  }),
-                ]),
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        children: [
+          if (lands.isEmpty)
+            Center(
+              child: Text('no lands', style: LCARS.small.copyWith(color: LCARS.gray)),
+            ),
+          for (final o in lands)
+            Padding(
+              padding: const EdgeInsets.only(right: 3),
+              child: PermanentView(
+                session: session!,
+                objectID: o.id,
+                width: 30,
+                highlighted: isCandidate(o.id),
+                selected: isSelected(o.id),
+                onTap: () => tapPermanent(o.id),
+                onLongPress: () => inspect(o.id),
               ),
-          ]),
-        );
+            ),
+        ],
+      ),
+    );
+    Widget mainRow() => Expanded(
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        children: [
+          if (others.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(top ? 'no permanents' : 'your battlefield', style: LCARS.small.copyWith(color: LCARS.gray)),
+              ),
+            ),
+          for (final o in others)
+            Padding(
+              padding: const EdgeInsets.only(right: 5),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  LayoutBuilder(
+                    builder: (_, box) {
+                      final w = (box.maxHeight / cardAspect).clamp(44.0, 80.0);
+                      return PermanentView(
+                        session: session!,
+                        objectID: o.id,
+                        width: w,
+                        highlighted: isCandidate(o.id),
+                        selected: isSelected(o.id),
+                        dimmed: isDimmed(o.id),
+                        onTap: () => tapPermanent(o.id),
+                        onLongPress: () => inspect(o.id),
+                        tag: blockTag(o.id),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: LCARS.panel.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(10)),
@@ -771,21 +926,40 @@ class _GameScreenState extends State<GameScreen> {
     final s = session!;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(children: [
-          Container(width: 12, height: 12, decoration: BoxDecoration(color: myTurn ? LCARS.orange : LCARS.skyBlue, shape: BoxShape.circle)),
-          const SizedBox(width: 6),
-          Expanded(child: Text(s.lastError ?? (s.match?.status ?? ''), style: LCARS.small.copyWith(color: s.lastError != null ? LCARS.alert : LCARS.gray), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          if (s.thinking) const ScanLine(color: LCARS.blue, width: 70),
-        ]),
-        const SizedBox(height: 4),
-        stackStrip(),
-        promptBar(),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(color: myTurn ? LCARS.orange : LCARS.skyBlue, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  s.lastError ?? (s.match?.status ?? ''),
+                  style: LCARS.small.copyWith(color: s.lastError != null ? LCARS.alert : LCARS.gray),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (s.thinking) const ScanLine(color: LCARS.blue, width: 70),
+            ],
+          ),
+          const SizedBox(height: 4),
+          stackStrip(),
+          promptBar(),
+        ],
+      ),
     );
   }
 
-  Widget _small(String label, VoidCallback? onTap, {Color color = LCARS.orange, bool fill = true, double width = 86}) => SizedBox(width: width, child: LcarsButton(label, height: 32, color: color, fill: fill, onPressed: onTap));
+  Widget _small(String label, VoidCallback? onTap, {Color color = LCARS.orange, bool fill = true, double width = 86}) => SizedBox(
+    width: width,
+    child: LcarsButton(label, height: 32, color: color, fill: fill, onPressed: onTap),
+  );
 
   /// Buttons opening each graveyard that holds a legal target for the current choice; the
   /// cards there are not on the table, so this is how the player reaches them.
@@ -804,43 +978,81 @@ class _GameScreenState extends State<GameScreen> {
     switch (i) {
       case Targeting t:
         final req = t.requirements.firstOrNull;
-        return Row(children: [
-          Expanded(child: Text(targetPrompt(req, t.chosen), style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          if (req != null) ...graveyardTargetButtons(game.legalTargets(req.filter, me, null)),
-          if (req != null && (req.filter.isPlayerFilter || req.filter.kind == FilterKind.creatureOrPlayer)) ...[
-            if (req.filter.kind != FilterKind.opponent) _small('You', () => chooseTargetPlayer(me), color: LCARS.peach, fill: false, width: 60),
+        return Row(
+          children: [
+            Expanded(
+              child: Text(targetPrompt(req, t.chosen), style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            if (req != null) ...graveyardTargetButtons(game.legalTargets(req.filter, me, null)),
+            if (req != null && (req.filter.isPlayerFilter || req.filter.kind == FilterKind.creatureOrPlayer)) ...[
+              if (req.filter.kind != FilterKind.opponent) _small('You', () => chooseTargetPlayer(me), color: LCARS.peach, fill: false, width: 60),
+              const SizedBox(width: 4),
+              _small(state.players[them].name, () => chooseTargetPlayer(them), color: LCARS.alert, width: 90),
+            ],
+            if (req != null && (req.optional || t.chosen.isNotEmpty)) ...[const SizedBox(width: 4), _small('Done', finishTargeting, color: LCARS.gold, width: 64)],
             const SizedBox(width: 4),
-            _small(state.players[them].name, () => chooseTargetPlayer(them), color: LCARS.alert, width: 90),
-          ],
-          if (req != null && (req.optional || t.chosen.isNotEmpty)) ...[const SizedBox(width: 4), _small('Done', finishTargeting, color: LCARS.gold, width: 64)],
-          const SizedBox(width: 4),
-          _small('Cancel', () => setState(() {
+            _small(
+              'Cancel',
+              () => setState(() {
                 interaction = const Idle();
                 selectedHandCard = null;
-              }), color: LCARS.red, fill: false, width: 70),
-        ]);
+              }),
+              color: LCARS.red,
+              fill: false,
+              width: 70,
+            ),
+          ],
+        );
       case Attacking a:
-        return Row(children: [
-          Expanded(child: Text('Choose attackers (${a.selected.length})', style: LCARS.font(12, color: LCARS.gold))),
-          _small('All', () => setState(() => interaction = Attacking(state.permanentsOf(me).where((o) => game.canAttack(o.id)).map((o) => o.id).toSet())), color: LCARS.peach, fill: false, width: 54),
-          const SizedBox(width: 4),
-          _small(a.selected.isEmpty ? 'No attack' : 'Attack!', () {
-            perform(DeclareAttackersAction(a.selected.toList()));
-            setState(() => interaction = const Idle());
-          }, color: LCARS.alert, width: 90),
-          const SizedBox(width: 4),
-          _small('Cancel', () => setState(() => interaction = const Idle()), color: LCARS.red, fill: false, width: 70),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text('Choose attackers (${a.selected.length})', style: LCARS.font(12, color: LCARS.gold)),
+            ),
+            _small(
+              'All',
+              () => setState(() => interaction = Attacking(state.permanentsOf(me).where((o) => game.canAttack(o.id)).map((o) => o.id).toSet())),
+              color: LCARS.peach,
+              fill: false,
+              width: 54,
+            ),
+            const SizedBox(width: 4),
+            _small(
+              a.selected.isEmpty ? 'No attack' : 'Attack!',
+              () {
+                perform(DeclareAttackersAction(a.selected.toList()));
+                setState(() => interaction = const Idle());
+              },
+              color: LCARS.alert,
+              width: 90,
+            ),
+            const SizedBox(width: 4),
+            _small('Cancel', () => setState(() => interaction = const Idle()), color: LCARS.red, fill: false, width: 70),
+          ],
+        );
       case Blocking b:
-        return Row(children: [
-          Expanded(child: Text(b.blocker == null ? 'Blocks: tap your creature, then the attacker' : 'Now tap the attacker ${game.name(b.blocker!)} blocks', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small(b.assignments.isEmpty ? 'No blocks' : 'Confirm', () {
-            perform(RespondAction(BlockersResponse(Map.of(b.assignments))));
-            setState(() => interaction = const Idle());
-          }, color: LCARS.skyBlue, width: 90),
-          const SizedBox(width: 4),
-          _small('Clear', () => setState(() => interaction = const Blocking(assignments: {})), color: LCARS.red, fill: false, width: 62),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(
+                b.blocker == null ? 'Blocks: tap your creature, then the attacker' : 'Now tap the attacker ${game.name(b.blocker!)} blocks',
+                style: LCARS.font(12, color: LCARS.gold),
+                maxLines: 2,
+              ),
+            ),
+            _small(
+              b.assignments.isEmpty ? 'No blocks' : 'Confirm',
+              () {
+                perform(RespondAction(BlockersResponse(Map.of(b.assignments))));
+                setState(() => interaction = const Idle());
+              },
+              color: LCARS.skyBlue,
+              width: 90,
+            ),
+            const SizedBox(width: 4),
+            _small('Clear', () => setState(() => interaction = const Blocking(assignments: {})), color: LCARS.red, fill: false, width: 62),
+          ],
+        );
       case Stationing _:
       case Equipping _:
       case BeamingUp _:
@@ -849,43 +1061,77 @@ class _GameScreenState extends State<GameScreen> {
           Equipping _ => 'Tap a creature to equip',
           _ => 'Beam me up: tap a creature you control to return to hand',
         };
-        return Row(children: [Expanded(child: Text(text, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)), _small('Cancel', () => setState(() => interaction = const Idle()), color: LCARS.red, fill: false, width: 70)]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(text, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Cancel', () => setState(() => interaction = const Idle()), color: LCARS.red, fill: false, width: 70),
+          ],
+        );
       case DecisionTargets d:
         final decision = state.pending?.decision;
         if (decision is ChooseTargetsDecision) {
-          return Row(children: [
-            Expanded(child: Text('${decision.prompt} (${d.chosen.length}/${decision.count})', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-            ...graveyardTargetButtons(decision.candidates),
-            if (decision.filter.isPlayerFilter || decision.filter.kind == FilterKind.creatureOrPlayer)
-              for (final pid in decision.candidates.where((c) => EffectContext.playerFromObject(c) != null)) ...[
-                _small(game.name(pid), () {
-                  perform(RespondAction(TargetsResponse([pid])));
-                  setState(() => interaction = const Idle());
-                }, color: LCARS.peach, width: 80),
-                const SizedBox(width: 4),
-              ],
-            if (decision.optional || d.chosen.isNotEmpty)
-              _small('Done', () {
-                perform(RespondAction(TargetsResponse(d.chosen)));
-                setState(() => interaction = const Idle());
-              }, color: LCARS.gold, width: 64),
-          ]);
+          return Row(
+            children: [
+              Expanded(
+                child: Text('${decision.prompt} (${d.chosen.length}/${decision.count})', style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+              ),
+              ...graveyardTargetButtons(decision.candidates),
+              if (decision.filter.isPlayerFilter || decision.filter.kind == FilterKind.creatureOrPlayer)
+                for (final pid in decision.candidates.where((c) => EffectContext.playerFromObject(c) != null)) ...[
+                  _small(
+                    game.name(pid),
+                    () {
+                      perform(RespondAction(TargetsResponse([pid])));
+                      setState(() => interaction = const Idle());
+                    },
+                    color: LCARS.peach,
+                    width: 80,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              if (decision.optional || d.chosen.isNotEmpty)
+                _small(
+                  'Done',
+                  () {
+                    perform(RespondAction(TargetsResponse(d.chosen)));
+                    setState(() => interaction = const Idle());
+                  },
+                  color: LCARS.gold,
+                  width: 64,
+                ),
+            ],
+          );
         }
         if (decision is ChooseSacrificeDecision) return Text(decision.prompt, style: LCARS.font(12, color: LCARS.gold));
         return const SizedBox.shrink();
       case PickingCards p:
         final decision = state.pending?.decision;
-        final need = switch (decision) { DiscardToHandSizeDecision d => d.count, ChooseBottomDecision d => d.count, _ => 0 };
+        final need = switch (decision) {
+          DiscardToHandSizeDecision d => d.count,
+          ChooseBottomDecision d => d.count,
+          _ => 0,
+        };
         final verb = decision is ChooseBottomDecision ? 'To the bottom' : 'Discard';
-        return Row(children: [
-          Expanded(child: Text('$verb: ${p.chosen.length}/$need chosen (tap cards in hand)', style: LCARS.font(12, color: LCARS.gold))),
-          _small('Done', p.chosen.length == need
-              ? () {
-                  perform(RespondAction(CardsResponse(p.chosen)));
-                  setState(() => interaction = const Idle());
-                }
-              : null, color: LCARS.gold, width: 64),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text('$verb: ${p.chosen.length}/$need chosen (tap cards in hand)', style: LCARS.font(12, color: LCARS.gold)),
+            ),
+            _small(
+              'Done',
+              p.chosen.length == need
+                  ? () {
+                      perform(RespondAction(CardsResponse(p.chosen)));
+                      setState(() => interaction = const Idle());
+                    }
+                  : null,
+              color: LCARS.gold,
+              width: 64,
+            ),
+          ],
+        );
       case Idle _:
         return idleButtons();
     }
@@ -898,27 +1144,43 @@ class _GameScreenState extends State<GameScreen> {
     if (pending != null && pending.player == me) return decisionButtons(pending);
     if (pending == null && state.priority == me) return priorityButtons();
     if (pending != null || state.playerToAct != me) {
-      return Row(children: [
-        Expanded(child: Text(s.isLinked ? 'Waiting for ${state.players[state.playerToAct ?? them].name}…' : '${state.players[them].name} is thinking…', style: LCARS.font(12, color: LCARS.skyBlue))),
-      ]);
+      return Row(
+        children: [
+          Expanded(
+            child: Text(s.isLinked ? 'Waiting for ${state.players[state.playerToAct ?? them].name}…' : '${state.players[them].name} is thinking…', style: LCARS.font(12, color: LCARS.skyBlue)),
+          ),
+        ],
+      );
     }
     final canAttackAny = state.permanentsOf(me).any((o) => game.canAttack(o.id));
     switch (state.phase) {
       case Phase.main1:
-        return Row(children: [
-          Expanded(child: LcarsButton('Attack', color: LCARS.alert, height: 36, onPressed: canAttackAny ? () => setState(() => interaction = const Attacking({})) : null)),
-          const SizedBox(width: 4),
-          Expanded(child: LcarsButton('Skip combat', color: LCARS.peach, fill: false, height: 36, onPressed: () => perform(const DeclareAttackersAction([])))),
-          const SizedBox(width: 4),
-          Expanded(child: LcarsButton('End turn', height: 36, onPressed: () => perform(const EndTurnAction()))),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: LcarsButton('Attack', color: LCARS.alert, height: 36, onPressed: canAttackAny ? () => setState(() => interaction = const Attacking({})) : null),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: LcarsButton('Skip combat', color: LCARS.peach, fill: false, height: 36, onPressed: () => perform(const DeclareAttackersAction([]))),
+            ),
+            const SizedBox(width: 4),
+            Expanded(child: LcarsButton('End turn', height: 36, onPressed: () => perform(const EndTurnAction()))),
+          ],
+        );
       case Phase.declareAttackers:
       case Phase.beginCombat:
-        return Row(children: [
-          Expanded(child: LcarsButton('Attack', color: LCARS.alert, height: 36, onPressed: () => setState(() => interaction = const Attacking({})))),
-          const SizedBox(width: 4),
-          Expanded(child: LcarsButton('No attack', color: LCARS.peach, fill: false, height: 36, onPressed: () => perform(const DeclareAttackersAction([])))),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: LcarsButton('Attack', color: LCARS.alert, height: 36, onPressed: () => setState(() => interaction = const Attacking({}))),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: LcarsButton('No attack', color: LCARS.peach, fill: false, height: 36, onPressed: () => perform(const DeclareAttackersAction([]))),
+            ),
+          ],
+        );
       case Phase.main2:
         return LcarsButton('End turn', height: 36, onPressed: () => perform(const EndTurnAction()));
       default:
@@ -940,10 +1202,14 @@ class _GameScreenState extends State<GameScreen> {
         _ => 'Cast an instant?',
       };
     }
-    return Row(children: [
-      Expanded(child: Text(text, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-      _small(top != null ? 'Let it resolve' : 'Pass', () => perform(const PassPriorityAction()), color: LCARS.skyBlue, width: top != null ? 128 : 70),
-    ]);
+    return Row(
+      children: [
+        Expanded(
+          child: Text(text, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+        ),
+        _small(top != null ? 'Let it resolve' : 'Pass', () => perform(const PassPriorityAction()), color: LCARS.skyBlue, width: top != null ? 128 : 70),
+      ],
+    );
   }
 
   /// Spells waiting to resolve, newest on the right. Tap one to target it (counterspells).
@@ -951,26 +1217,37 @@ class _GameScreenState extends State<GameScreen> {
     if (state.stack.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 74,
-      child: Row(children: [
-        RotatedBox(quarterTurns: 3, child: Text('STACK', style: LCARS.font(10, color: LCARS.gold))),
-        const SizedBox(width: 4),
-        Expanded(
-          child: ListView(scrollDirection: Axis.horizontal, children: [
-            for (final item in state.stack)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: GestureDetector(
-                  onTap: () => isCandidate(item.id) ? tapPermanent(item.id) : inspect(item.id),
-                  onLongPress: () => inspect(item.id),
-                  child: Container(
-                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), border: Border.all(color: isCandidate(item.id) ? LCARS.gold : (item.controller == me ? LCARS.orange : LCARS.alert), width: 2)),
-                    child: CardFace(card: game.card(item.id), width: 50),
+      child: Row(
+        children: [
+          RotatedBox(
+            quarterTurns: 3,
+            child: Text('STACK', style: LCARS.font(10, color: LCARS.gold)),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final item in state.stack)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: GestureDetector(
+                      onTap: () => isCandidate(item.id) ? tapPermanent(item.id) : inspect(item.id),
+                      onLongPress: () => inspect(item.id),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(color: isCandidate(item.id) ? LCARS.gold : (item.controller == me ? LCARS.orange : LCARS.alert), width: 2),
+                        ),
+                        child: CardFace(card: game.card(item.id), width: 50),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-          ]),
-        ),
-      ]),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -979,100 +1256,219 @@ class _GameScreenState extends State<GameScreen> {
     switch (d) {
       case PayOrCounterDecision c:
         final canPay = game.canPay(c.cost, me);
-        return Row(children: [
-          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Pay ${c.cost}', canPay ? () => perform(const RespondAction(YesResponse())) : null, color: LCARS.green, width: 96),
-          const SizedBox(width: 4),
-          _small("Don't", () => perform(const RespondAction(NoResponse())), color: LCARS.red, fill: false, width: 70),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Pay ${c.cost}', canPay ? () => perform(const RespondAction(YesResponse())) : null, color: LCARS.green, width: 96),
+            const SizedBox(width: 4),
+            _small("Don't", () => perform(const RespondAction(NoResponse())), color: LCARS.red, fill: false, width: 70),
+          ],
+        );
       case MulliganDecision _:
         final taken = state.players[pending.player].mulligans;
-        return Row(children: [
-          Expanded(child: Text(taken == 0 ? 'Keep this hand?' : 'Keep this hand of ${state.players[pending.player].hand.length}?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Keep', () => perform(const RespondAction(KeepResponse())), color: LCARS.green, width: 76),
-          const SizedBox(width: 4),
-          _small('Mulligan', () => perform(const RespondAction(MulliganResponse())), color: LCARS.red, fill: false, width: 124),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(taken == 0 ? 'Keep this hand?' : 'Keep this hand of ${state.players[pending.player].hand.length}?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Keep', () => perform(const RespondAction(KeepResponse())), color: LCARS.green, width: 76),
+            const SizedBox(width: 4),
+            _small('Mulligan', () => perform(const RespondAction(MulliganResponse())), color: LCARS.red, fill: false, width: 124),
+          ],
+        );
       case DeclareBlockersDecision _:
-        return LcarsButton('Declare blockers', color: LCARS.skyBlue, height: 36, onPressed: () => setState(() => interaction = const Blocking(assignments: {})));
+        return LcarsButton(
+          'Declare blockers',
+          color: LCARS.skyBlue,
+          height: 36,
+          onPressed: () => setState(() => interaction = const Blocking(assignments: {})),
+        );
       case ChooseTargetsDecision c:
-        return Row(children: [
-          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Choose', () {
-            setState(() => interaction = const DecisionTargets([]));
-            // Every candidate is in a graveyard (Death Is Irrelevant, Daniels…): open it.
-            final inGrave = state.players.where((p) => c.candidates.any(p.graveyard.contains)).toList();
-            if (inGrave.isNotEmpty && c.candidates.every((id) => inGrave.any((p) => p.graveyard.contains(id)))) showGraveyard(inGrave.first.id);
-          }, color: LCARS.gold, width: 80),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small(
+              'Choose',
+              () {
+                setState(() => interaction = const DecisionTargets([]));
+                // Every candidate is in a graveyard (Death Is Irrelevant, Daniels…): open it.
+                final inGrave = state.players.where((p) => c.candidates.any(p.graveyard.contains)).toList();
+                if (inGrave.isNotEmpty && c.candidates.every((id) => inGrave.any((p) => p.graveyard.contains(id)))) showGraveyard(inGrave.first.id);
+              },
+              color: LCARS.gold,
+              width: 80,
+            ),
+          ],
+        );
       case ChooseModeDecision c:
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
-          const SizedBox(height: 4),
-          if (c.modes.every((m) => m.length <= 8) && c.modes.length > 3)
-            Wrap(spacing: 4, runSpacing: 4, children: [for (var i = 0; i < c.modes.length; i++) SizedBox(width: 52, child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 32, onPressed: () => perform(RespondAction(ModeResponse(i)))))])
-          else if (c.modes.length <= 2 && c.modes.every((m) => m.length <= 24))
-            Row(children: [for (var i = 0; i < c.modes.length; i++) ...[Expanded(child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 34, onPressed: () => perform(RespondAction(ModeResponse(i))))), if (i < c.modes.length - 1) const SizedBox(width: 4)]])
-          else
-            LcarsButton('Choose', color: LCARS.lavender, height: 34, onPressed: () => _showSheet(c.prompt, [for (var i = 0; i < c.modes.length; i++) _sheetButton(c.modes[i], () => perform(RespondAction(ModeResponse(i))), color: LCARS.lavender)])),
-        ]);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            const SizedBox(height: 4),
+            if (c.modes.every((m) => m.length <= 8) && c.modes.length > 3)
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (var i = 0; i < c.modes.length; i++)
+                    SizedBox(
+                      width: 52,
+                      child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 32, onPressed: () => perform(RespondAction(ModeResponse(i)))),
+                    ),
+                ],
+              )
+            else if (c.modes.length <= 2 && c.modes.every((m) => m.length <= 24))
+              Row(
+                children: [
+                  for (var i = 0; i < c.modes.length; i++) ...[
+                    Expanded(
+                      child: LcarsButton(c.modes[i], color: LCARS.lavender, height: 34, onPressed: () => perform(RespondAction(ModeResponse(i)))),
+                    ),
+                    if (i < c.modes.length - 1) const SizedBox(width: 4),
+                  ],
+                ],
+              )
+            else
+              LcarsButton(
+                'Choose',
+                color: LCARS.lavender,
+                height: 34,
+                onPressed: () => _showSheet(c.prompt, [for (var i = 0; i < c.modes.length; i++) _sheetButton(c.modes[i], () => perform(RespondAction(ModeResponse(i))), color: LCARS.lavender)]),
+              ),
+          ],
+        );
       case ChooseModesDecision c:
-        return Row(children: [
-          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Choose', () => showPickSheet(c.prompt, labels: c.modes, min: c.min, max: c.max, onDone: (picks) => perform(RespondAction(CardsResponse(picks)))), color: LCARS.gold, width: 80),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small(
+              'Choose',
+              () => showPickSheet(c.prompt, labels: c.modes, min: c.min, max: c.max, onDone: (picks) => perform(RespondAction(CardsResponse(picks)))),
+              color: LCARS.gold,
+              width: 80,
+            ),
+          ],
+        );
       case ChooseCardsDecision c:
-        return Row(children: [
-          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Choose', () => showPickSheet(c.prompt, cards: c.cards, min: c.min, max: c.max, onDone: (picks) => perform(RespondAction(CardsResponse(picks)))), color: LCARS.gold, width: 80),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small(
+              'Choose',
+              () => showPickSheet(c.prompt, cards: c.cards, min: c.min, max: c.max, onDone: (picks) => perform(RespondAction(CardsResponse(picks)))),
+              color: LCARS.gold,
+              width: 80,
+            ),
+          ],
+        );
       case ChooseOptionalDecision c:
-        return Row(children: [
-          Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Yes', () => perform(const RespondAction(YesResponse())), color: LCARS.green, width: 60),
-          const SizedBox(width: 4),
-          _small('No', () => perform(const RespondAction(NoResponse())), color: LCARS.red, fill: false, width: 60),
-        ]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Yes', () => perform(const RespondAction(YesResponse())), color: LCARS.green, width: 60),
+            const SizedBox(width: 4),
+            _small('No', () => perform(const RespondAction(NoResponse())), color: LCARS.red, fill: false, width: 60),
+          ],
+        );
       case DiscardToHandSizeDecision c:
-        return Row(children: [Expanded(child: Text('Discard ${c.count} card${c.count == 1 ? '' : 's'}', style: LCARS.font(12, color: LCARS.gold))), _small('Choose', () => setState(() => interaction = const PickingCards([])), color: LCARS.gold, width: 80)]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text('Discard ${c.count} card${c.count == 1 ? '' : 's'}', style: LCARS.font(12, color: LCARS.gold)),
+            ),
+            _small('Choose', () => setState(() => interaction = const PickingCards([])), color: LCARS.gold, width: 80),
+          ],
+        );
       case ChooseBottomDecision c:
-        return Row(children: [Expanded(child: Text('Mulligan: put ${c.count} card${c.count == 1 ? '' : 's'} on the bottom', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)), _small('Choose', () => setState(() => interaction = const PickingCards([])), color: LCARS.gold, width: 80)]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text('Mulligan: put ${c.count} card${c.count == 1 ? '' : 's'} on the bottom', style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Choose', () => setState(() => interaction = const PickingCards([])), color: LCARS.gold, width: 80),
+          ],
+        );
       case ChooseSacrificeDecision c:
-        return Row(children: [Expanded(child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2)), _small('Choose', () => setState(() => interaction = const DecisionTargets([])), color: LCARS.gold, width: 80)]);
+        return Row(
+          children: [
+            Expanded(
+              child: Text(c.prompt, style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Choose', () => setState(() => interaction = const DecisionTargets([])), color: LCARS.gold, width: 80),
+          ],
+        );
       case SurveilDecision _:
       case ScryDecision _:
         final cards = d is SurveilDecision ? d.cards : (d as ScryDecision).cards;
         final chosen = interaction is PickingCards ? (interaction as PickingCards).chosen : const <ObjectID>[];
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(d is SurveilDecision ? 'Surveil: tap cards to put in your graveyard' : 'Scry: tap cards to put on the bottom', style: LCARS.font(12, color: LCARS.gold)),
-          const SizedBox(height: 4),
-          Row(children: [
-            for (final id in cards) Padding(padding: const EdgeInsets.only(right: 4), child: GestureDetector(onTap: () => togglePick(id), child: CardFace(card: game.card(id), width: 46, border: chosen.contains(id) ? LCARS.gold : null))),
-            const Spacer(),
-            _small('Done', () {
-              perform(RespondAction(CardsResponse(List.of(chosen))));
-              setState(() => interaction = const Idle());
-            }, color: LCARS.gold, width: 64),
-          ]),
-        ]);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(d is SurveilDecision ? 'Surveil: tap cards to put in your graveyard' : 'Scry: tap cards to put on the bottom', style: LCARS.font(12, color: LCARS.gold)),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                for (final id in cards)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: GestureDetector(
+                      onTap: () => togglePick(id),
+                      child: CardFace(card: game.card(id), width: 46, border: chosen.contains(id) ? LCARS.gold : null),
+                    ),
+                  ),
+                const Spacer(),
+                _small(
+                  'Done',
+                  () {
+                    perform(RespondAction(CardsResponse(List.of(chosen))));
+                    setState(() => interaction = const Idle());
+                  },
+                  color: LCARS.gold,
+                  width: 64,
+                ),
+              ],
+            ),
+          ],
+        );
       case ExploreDecision c:
-        return Row(children: [
-          CardFace(card: game.card(c.card), width: 40),
-          const SizedBox(width: 6),
-          Expanded(child: Text('Explore: keep ${game.name(c.card)} on top?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Keep', () => perform(const RespondAction(ExploreResponse(false))), color: LCARS.green, width: 60),
-          const SizedBox(width: 4),
-          _small('Graveyard', () => perform(const RespondAction(ExploreResponse(true))), color: LCARS.red, fill: false, width: 90),
-        ]);
+        return Row(
+          children: [
+            CardFace(card: game.card(c.card), width: 40),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Explore: keep ${game.name(c.card)} on top?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Keep', () => perform(const RespondAction(ExploreResponse(false))), color: LCARS.green, width: 60),
+            const SizedBox(width: 4),
+            _small('Graveyard', () => perform(const RespondAction(ExploreResponse(true))), color: LCARS.red, fill: false, width: 90),
+          ],
+        );
       case DiscoverDecision c:
-        return Row(children: [
-          CardFace(card: game.card(c.card), width: 40),
-          const SizedBox(width: 6),
-          Expanded(child: Text('Discover: play ${game.name(c.card)} for free?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2)),
-          _small('Play', () => perform(const RespondAction(DiscoverResponse(true))), color: LCARS.green, width: 60),
-          const SizedBox(width: 4),
-          _small('To hand', () => perform(const RespondAction(DiscoverResponse(false))), color: LCARS.peach, fill: false, width: 80),
-        ]);
+        return Row(
+          children: [
+            CardFace(card: game.card(c.card), width: 40),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Discover: play ${game.name(c.card)} for free?', style: LCARS.font(12, color: LCARS.gold), maxLines: 2),
+            ),
+            _small('Play', () => perform(const RespondAction(DiscoverResponse(true))), color: LCARS.green, width: 60),
+            const SizedBox(width: 4),
+            _small('To hand', () => perform(const RespondAction(DiscoverResponse(false))), color: LCARS.peach, fill: false, width: 80),
+          ],
+        );
     }
   }
 
@@ -1086,6 +1482,8 @@ class _GameScreenState extends State<GameScreen> {
       FilterKind.enchantment => 'enchantment',
       FilterKind.land => 'land',
       FilterKind.creatureCardInGraveyard => 'creature card in a graveyard',
+      FilterKind.cardInGraveyard => 'card in a graveyard',
+      FilterKind.permanentCardInGraveyard => 'permanent card in a graveyard',
       FilterKind.spacecraft => 'Spacecraft',
       FilterKind.creatureOrSpacecraft => 'creature or Spacecraft',
       _ => 'permanent',
@@ -1094,21 +1492,71 @@ class _GameScreenState extends State<GameScreen> {
     return 'Tap target $what$who${req.count > 1 ? ' (${chosen.length}/${req.count})' : ''}';
   }
 
+  String zoneLabel(ObjectID id) => switch (state.objects[id]?.zone) {
+    Zone.exile => 'FROM EXILE',
+    Zone.library => 'TOP OF LIBRARY',
+    Zone.graveyard => 'FROM GRAVEYARD',
+    _ => '',
+  };
+
+  /// Abilities of a card in a hand or graveyard that can be used from there right now.
+  List<(int, Activated)> zoneAbilities(ObjectID id) {
+    final o = state.objects[id];
+    if (o == null || !canAct) return const [];
+    final all = game.abilitiesIn(o);
+    return [
+      for (var i = 0; i < all.length; i++)
+        if (all[i] case final Activated a when a.cost.zone != AbilityZone.battlefield && game.activationProblem(id, i, me) == null) (i, a),
+    ];
+  }
+
   Widget hand() {
     final hidden = session!.mode == SessionMode.hotseat && state.playerToAct != me;
     final ids = state.players[me].hand;
     final picked = interaction is PickingCards ? (interaction as PickingCards).chosen : const <ObjectID>[];
     return SizedBox(
       height: 150,
-      child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(8, 14, 8, 6), children: [
-        for (final id in ids)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: hidden
-                ? Container(width: 60, height: 84, alignment: Alignment.center, decoration: BoxDecoration(color: LCARS.panel, borderRadius: BorderRadius.circular(4)), child: Text('MT', style: LCARS.label.copyWith(color: LCARS.gray)))
-                : HandCardView(session: session!, objectID: id, width: 84, playable: playable(id), selected: selectedHandCard == id || picked.contains(id), onTap: () => tapHandCard(id), onLongPress: () => inspect(id)),
-          ),
-      ]),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+        children: [
+          for (final id in ids)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: hidden
+                  ? Container(
+                      width: 60,
+                      height: 84,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: LCARS.panel, borderRadius: BorderRadius.circular(4)),
+                      child: Text('MT', style: LCARS.label.copyWith(color: LCARS.gray)),
+                    )
+                  : HandCardView(
+                      session: session!,
+                      objectID: id,
+                      width: 84,
+                      playable: playable(id),
+                      selected: selectedHandCard == id || picked.contains(id),
+                      onTap: () => tapHandCard(id),
+                      onLongPress: () => inspect(id),
+                    ),
+            ),
+          // Cards playable from elsewhere right now: exiled by an effect, the top of the library,
+          // the graveyard. They sit after the hand with where they are written above them.
+          if (!hidden)
+            for (final id in game.extraPlayables(me))
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(zoneLabel(id), style: LCARS.font(9, color: LCARS.gold)),
+                    HandCardView(session: session!, objectID: id, width: 76, playable: playable(id), selected: selectedHandCard == id, onTap: () => tapHandCard(id), onLongPress: () => inspect(id)),
+                  ],
+                ),
+              ),
+        ],
+      ),
     );
   }
 
@@ -1121,16 +1569,23 @@ class _GameScreenState extends State<GameScreen> {
       child: Container(
         margin: const EdgeInsets.all(30),
         padding: const EdgeInsets.all(26),
-        decoration: BoxDecoration(color: LCARS.panel.withValues(alpha: 0.96), borderRadius: BorderRadius.circular(24), border: Border.all(color: won ? LCARS.gold : LCARS.red, width: 3)),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(won ? 'VICTORY' : 'DEFEAT', style: LCARS.font(44, color: won ? LCARS.gold : LCARS.red)),
-          const SizedBox(height: 8),
-          Text(reason, style: LCARS.body, textAlign: TextAlign.center),
-          const SizedBox(height: 6),
-          Text(won ? 'Live long and prosper.' : 'Today was a good day to die.', style: LCARS.label.copyWith(color: LCARS.lavender)),
-          const SizedBox(height: 16),
-          SizedBox(width: 220, child: LcarsButton('Return to bridge', onPressed: () => Navigator.pop(context))),
-        ]),
+        decoration: BoxDecoration(
+          color: LCARS.panel.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: won ? LCARS.gold : LCARS.red, width: 3),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(won ? 'VICTORY' : 'DEFEAT', style: LCARS.font(44, color: won ? LCARS.gold : LCARS.red)),
+            const SizedBox(height: 8),
+            Text(reason, style: LCARS.body, textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(won ? 'Live long and prosper.' : 'Today was a good day to die.', style: LCARS.label.copyWith(color: LCARS.lavender)),
+            const SizedBox(height: 16),
+            SizedBox(width: 220, child: LcarsButton('Return to bridge', onPressed: () => Navigator.pop(context))),
+          ],
+        ),
       ),
     );
   }
@@ -1225,12 +1680,12 @@ class EventText {
   }
 
   static Color color(GameEvent e) => switch (e.kind) {
-        'turnBegan' => LCARS.orange,
-        'damage' || 'died' || 'destroyed' => LCARS.red,
-        'cast' || 'playedLand' => LCARS.peach,
-        'gameOver' => LCARS.gold,
-        _ => LCARS.lavender,
-      };
+    'turnBegan' => LCARS.orange,
+    'damage' || 'died' || 'destroyed' => LCARS.red,
+    'cast' || 'playedLand' => LCARS.peach,
+    'gameOver' => LCARS.gold,
+    _ => LCARS.lavender,
+  };
 }
 
 extension<T> on List<T> {

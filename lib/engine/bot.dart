@@ -259,7 +259,7 @@ class Bot {
   }
 
   static ObjectID? bestLand(Game game, PlayerID p) {
-    final lands = game.state.players[p].hand.where((id) => game.canPlayLand(id, p)).toList();
+    final lands = [...game.state.players[p].hand, ...game.extraPlayables(p)].where((id) => game.canPlayLand(id, p)).toList();
     if (lands.isEmpty) return null;
     final have = <ManaColor>{};
     for (final o in game.state.permanentsOf(p)) {
@@ -284,7 +284,7 @@ class Bot {
   }
 
   static GameAction? bestCast(Game game, PlayerID p) {
-    final hand = game.state.players[p].hand.where((id) => game.canCast(id, p)).toList();
+    final hand = [...game.state.players[p].hand, ...game.extraPlayables(p)].where((id) => game.canCast(id, p)).toList();
     final opp = game.state.opponentOf(p);
     GameAction? best;
     var bestScore = -1 << 30;
@@ -340,7 +340,7 @@ class Bot {
   /// kill an attacker, or flash something in at the end of the opponent's turn.
   static GameAction? bestResponse(Game game, PlayerID p) {
     final s = game.state;
-    final hand = s.players[p].hand.where((id) => game.canCast(id, p)).toList();
+    final hand = [...s.players[p].hand, ...game.extraPlayables(p)].where((id) => game.canCast(id, p)).toList();
     if (hand.isEmpty) return null;
     final top = s.stack.isEmpty ? null : s.stack.last;
     if (top != null) {
@@ -512,23 +512,28 @@ class Bot {
   }
 
   static GameAction? bestActivation(Game game, PlayerID p) {
-    for (final o in game.state.permanentsOf(p)) {
-      final parsed = game.parsedOf(o);
-      if (parsed == null) continue;
-      for (var i = 0; i < parsed.abilities.length; i++) {
-        final a = parsed.abilities[i];
+    final me = game.state.players[p];
+    final sources = [
+      ...game.state.permanentsOf(p),
+      for (final id in [...me.hand, ...me.graveyard]) ?game.state.objects[id],
+    ];
+    for (final o in sources) {
+      final all = game.abilitiesIn(o);
+      for (var i = 0; i < all.length; i++) {
+        final a = all[i];
         if (a is! Activated) continue;
         final cost = a.cost;
         final fx = a.effects;
-        if (a.sorcerySpeed && !game.state.phase.isMain) continue;
-        if (cost.oncePerTurn && o.activatedThisTurn.contains(i)) continue;
-        if (cost.tap && o.tapped) continue;
+        if (game.activationProblem(o.id, i, p) != null) continue;
         if (cost.sacrificeSelf && fx.length == 1 && fx[0] is AddMana) continue; // Treasure: used by manaPlan
-        if (cost.sacrificeSelf && cost.tap && fx.length == 1 && fx[0] is Draw && game.state.players[p].hand.length > 3) continue; // Clue: keep for later
+        if (cost.sacrificeSelf && cost.tap && fx.length == 1 && fx[0] is Draw && me.hand.length > 3) continue; // Clue: keep for later
         if (cost.discard > 0 || cost.sacrifice != null || cost.payLife > 0) continue;
-        if (cost.tap && game.characteristics(o.id).isCreature && (game.hasSummoningSickness(o) || game.state.phase == Phase.main1)) continue;
+        // A card in hand is usually worth more cast than discarded for its ability.
+        if (cost.zone == AbilityZone.hand && (game.canCast(o.id, p) || game.state.phase != Phase.main2)) continue;
+        // Tapping creatures to pay costs only after combat.
+        if (cost.tapOthers > 0 && game.state.phase != Phase.main2 && game.state.activePlayer == p) continue;
+        if (cost.tap && game.characteristics(o.id).isCreature && game.state.phase == Phase.main1) continue;
         if (fx.any((e) => e is AddMana)) continue;
-        if (!game.canPay(cost.mana, p)) continue;
         final targets = <ObjectID>[];
         var ok = true;
         for (final r in game.targetRequirementsIn(fx)) {
