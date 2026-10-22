@@ -16,6 +16,8 @@ class MainActivity : FlutterActivity() {
         // downloaded APK (see lib/app/updater.dart).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "magictrek/updater").setMethodCallHandler { call, result ->
             when (call.method) {
+                // Which runtime permissions Bluetooth needs depends on the Android version.
+                "sdkInt" -> result.success(Build.VERSION.SDK_INT)
                 "version" -> {
                     val info = packageManager.getPackageInfo(packageName, 0)
                     val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:permission_handler/permission_handler.dart';
 
 import 'transport.dart';
@@ -58,10 +59,31 @@ class _Reassembler {
   }
 }
 
+/// Asks Android for what Bluetooth needs on the running version, or throws a [StateError]
+/// naming what was refused. Android 12 (API 31) introduced its own runtime permissions
+/// for scanning, connecting and advertising; before that, scanning needed location. The
+/// manifest declares location only up to Android 11, so asking for it later could only
+/// come back denied.
 Future<bool> requestBluetoothPermissions() async {
   if (!Platform.isAndroid) return true;
-  final results = await [Permission.bluetoothScan, Permission.bluetoothConnect, Permission.bluetoothAdvertise, Permission.locationWhenInUse].request();
-  return results.values.every((s) => s.isGranted || s.isLimited);
+  var sdk = 31;
+  try {
+    sdk = await const MethodChannel('magictrek/updater').invokeMethod<int>('sdkInt') ?? sdk;
+  } catch (_) {}
+  final wanted = sdk >= 31
+      ? [Permission.bluetoothScan, Permission.bluetoothConnect, Permission.bluetoothAdvertise]
+      : [Permission.locationWhenInUse];
+  final results = await wanted.request();
+  final refused = results.entries.where((e) => !(e.value.isGranted || e.value.isLimited)).toList();
+  if (refused.isEmpty) return true;
+  final names = refused.map((e) => switch (e.key) {
+        Permission.bluetoothScan => 'scan',
+        Permission.bluetoothConnect => 'connect',
+        Permission.bluetoothAdvertise => 'advertise',
+        _ => 'location',
+      }).join(', ');
+  final settings = refused.any((e) => e.value.isPermanentlyDenied) ? ' Allow "Nearby devices" for MagicTrek in Android Settings → Apps.' : '';
+  throw StateError('Bluetooth permission refused ($names).$settings');
 }
 
 Future<void> _waitPoweredOn(Stream<BluetoothLowEnergyStateChangedEventArgs> changes, BluetoothLowEnergyState Function() current) async {
