@@ -7,6 +7,10 @@ import 'state.dart';
 /// The computer opponent: simple, fast heuristics. Also answers choices the engine makes on a
 /// player's behalf (an opponent discarding, a bot's surveil).
 class Bot {
+  /// Below any real score. Not `-1 << 30`: compiled to JavaScript a shift gives an unsigned
+  /// 32-bit result, so that is +3221225472 in the browser and nothing would ever beat it.
+  static const minScore = -1000000000;
+
   /// The next action for the bot, or null when it has nothing left to do this phase.
   static GameAction? nextAction(Game game, PlayerID p) {
     final s = game.state;
@@ -271,7 +275,7 @@ class Bot {
       }
     }
     ManaColor? best;
-    var bestScore = -1 << 30;
+    var bestScore = minScore;
     for (final c in ManaColor.values) {
       if (need[c] == null) continue;
       final score = need[c]! - (have[c] ?? 0);
@@ -312,7 +316,7 @@ class Bot {
     final hand = [...game.state.players[p].hand, ...game.extraPlayables(p)].where((id) => game.canCast(id, p)).toList();
     final opp = game.state.opponentOf(p);
     GameAction? best;
-    var bestScore = -1 << 30;
+    var bestScore = minScore;
     for (final id in hand) {
       final card = game.card(id);
       if (card == null) continue;
