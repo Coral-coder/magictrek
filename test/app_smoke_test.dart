@@ -161,7 +161,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
     }
-    await store.setShowAllCards(true);
+    await store.setShowAllCards(false);
   });
 
   testWidgets('tokens are drawn as cards, and the table button switches lands between cards and labels', (tester) async {
@@ -170,7 +170,7 @@ void main() {
     addTearDown(tester.view.reset);
     final store = AppStore.shared;
     await store.setTourSeen(true);
-    await store.setShowAllCards(true);
+    expect(store.showAllCards, isFalse, reason: 'lands are labels by default');
     final decks = store.legalDecks;
     final session = store.startLocalGame(deck: decks[0], opponentDeck: decks[1], hotseat: false);
     final g = session.game;
@@ -186,16 +186,16 @@ void main() {
     expect(find.descendant(of: officerCard, matching: find.text('Token Creature — Officer')), findsOneWidget);
     // The Treasure uses its printed scan.
     expect(find.descendant(of: find.byKey(ValueKey('perm-$treasure')), matching: find.byType(TokenFace)), findsNothing);
-    expect(find.byKey(ValueKey('perm-$land')), findsOneWidget, reason: 'lands show as cards by default');
-    await tester.tap(find.byKey(const ValueKey('show-all-cards')));
-    await tester.pump();
-    expect(store.showAllCards, isFalse);
+    expect(find.byKey(const ValueKey('land-Plains')), findsOneWidget, reason: 'a label by default');
     expect(find.byKey(ValueKey('perm-$land')), findsNothing);
-    expect(find.byKey(const ValueKey('land-Plains')), findsOneWidget, reason: 'now a label');
     await tester.tap(find.byKey(const ValueKey('show-all-cards')));
     await tester.pump();
     expect(store.showAllCards, isTrue);
-    expect(find.byKey(ValueKey('perm-$land')), findsOneWidget);
+    expect(find.byKey(ValueKey('perm-$land')), findsOneWidget, reason: 'now a card');
+    await tester.tap(find.byKey(const ValueKey('show-all-cards')));
+    await tester.pump();
+    expect(store.showAllCards, isFalse);
+    expect(find.byKey(const ValueKey('land-Plains')), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
   });

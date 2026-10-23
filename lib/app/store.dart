@@ -35,7 +35,7 @@ class AppStore extends ChangeNotifier implements MatchArchive {
 
   /// Every card in play shown as a card, lands included (one card per land). Off: lands are
   /// labels grouped by name, to leave more room.
-  bool showAllCards = true;
+  bool showAllCards = false;
   /// Whether the guided tour of the table has been shown (or skipped).
   bool tourSeen = false;
   Rules rules = Rules.standard;
@@ -55,7 +55,7 @@ class AppStore extends ChangeNotifier implements MatchArchive {
     autoUpdate = _prefs.getBool('autoUpdate') ?? true;
     tapToInspect = _prefs.getBool('tapToInspect') ?? true;
     coachOn = _prefs.getBool('coachOn') ?? true;
-    showAllCards = _prefs.getBool('showAllCards') ?? true;
+    showAllCards = _prefs.getBool('showAllCards') ?? false;
     tourSeen = _prefs.getBool('tourSeen') ?? false;
     final rulesJson = _prefs.getString('rules');
     if (rulesJson != null) {

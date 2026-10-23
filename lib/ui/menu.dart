@@ -161,7 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SwitchListTile(
             title: Text('Show every card in play', style: LCARS.body),
-            subtitle: Text('Every card on the table as a card, lands included. Off: lands are labels grouped by name, such as "3× Plains · 2 ready", leaving more room for the other cards. The cards button at the top of the table switches it too.', style: LCARS.label),
+            subtitle: Text('Every card on the table as a card, lands included. Off: lands are labels grouped by name, such as "3× Plains · 2 ready", leaving more room for the other cards. The cards button at the top of the table switches it during a game.', style: LCARS.label),
             value: store.showAllCards,
             activeThumbColor: LCARS.orange,
             onChanged: store.setShowAllCards,

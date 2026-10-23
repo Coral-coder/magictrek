@@ -125,7 +125,7 @@ class _GameScreenState extends State<GameScreen> {
     const TourStep('Welcome aboard', 'A one-minute look around the table. You can see it again any time from the ? button at the top.'),
     TourStep('Your opponent', 'Their name, life, and how many cards they hold, have in their deck and in their graveyard. Below: the cards they have in play. Tap any of them to read it.', target: _tourOpponent),
     TourStep('The command bar', 'The light bulb line tells you what you can do right now. The buttons move the game on: Attack, End turn, and answers when a card asks you something.', target: _tourBar),
-    TourStep('Your battlefield', 'Your creatures and other cards in play, with your lands underneath. A sideways card is tapped (used this turn). The cards button at the top switches lands to compact labels and back.', target: _tourMine),
+    TourStep('Your battlefield', 'Your creatures and other cards in play, with your lands underneath: each label says how many are ready to tap for mana this turn. The cards button at the top shows every land as a card instead.', target: _tourMine),
     TourStep('Your status', 'Your life (lose it all and you lose), cards in hand, deck and graveyard. Tap GRAVE to look through a graveyard.', target: _tourStrip),
     TourStep('Your hand', 'Cards with a blue glow can be played now. Tap any card to see it large and choose what to do with it. Slide sideways to see the rest.', target: _tourHand),
     TourStep('Help', 'Lost? Tap here for help on what to do now, the full rules, and to turn these hints off. Good luck, Captain.', target: _tourHelp),
