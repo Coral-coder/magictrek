@@ -40,28 +40,151 @@ class CardFace extends StatelessWidget {
   }
 }
 
-/// Tokens have no scan: an LCARS card drawn from the spec.
+/// A token with no printed scan, drawn as a card: name bar, art, type line, rules text and
+/// power/toughness in a frame of its color.
 class TokenFace extends StatelessWidget {
   const TokenFace({super.key, this.card, this.token, required this.width});
   final Card? card;
   final TokenSpec? token;
   final double width;
+
+  // Frame and pale panel colors, like a card's frame.
+  static const _frames = {
+    'W': (Color(0xFFE6DCC0), Color(0xFFF8F3E3)),
+    'U': (Color(0xFF2A6FB0), Color(0xFFD3E3F2)),
+    'B': (Color(0xFF3B3533), Color(0xFFD6CDCA)),
+    'R': (Color(0xFFC0432C), Color(0xFFF4D0C2)),
+    'G': (Color(0xFF2E7A47), Color(0xFFD0E6D3)),
+    'multi': (Color(0xFFC6A445), Color(0xFFF2E6B8)),
+    'land': (Color(0xFF8A6D4C), Color(0xFFE9DCC8)),
+    'none': (Color(0xFF8F99A3), Color(0xFFE0E4E8)),
+  };
+
+  /// A picture for the art box, from what the token is.
+  static IconData iconFor(String name, List<String> subtypes, {bool land = false, bool artifact = false}) {
+    final words = {name.toLowerCase(), ...subtypes.map((s) => s.toLowerCase())};
+    bool has(String w) => words.any((x) => x.contains(w));
+    if (land || has('planet')) return Icons.public;
+    if (has('borg')) return Icons.hub;
+    if (has('klingon') || has('warrior')) return Icons.shield;
+    if (has('romulan')) return Icons.visibility;
+    if (has('officer')) return Icons.badge;
+    if (has('human')) return Icons.person;
+    if (has('dog') || has('porthos')) return Icons.pets;
+    if (has('tribble')) return Icons.blur_on;
+    if (has('worm')) return Icons.gesture;
+    if (has('illusion')) return Icons.auto_awesome;
+    if (has('treasure')) return Icons.diamond;
+    if (has('clue')) return Icons.search;
+    if (has('food')) return Icons.restaurant;
+    if (has('spacecraft') || has('ship')) return Icons.rocket_launch;
+    return artifact ? Icons.settings : Icons.auto_awesome;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final t = token;
-    final name = t?.name ?? card?.name ?? 'Token';
-    final color = t != null && t.colors.isNotEmpty ? LCARS.forMana(t.colors.first.symbol) : LCARS.gray;
+    final t = token, c = card;
+    final name = (t?.name ?? c?.name ?? '').isEmpty ? 'Token' : (t?.name ?? c!.name);
+    final colors = t != null ? t.colors.map((m) => m.symbol).toList() : (c?.colors ?? const <String>[]);
+    final isLand = t?.isLand ?? c?.isLand ?? false;
+    final isArtifact = t?.isArtifact ?? c?.types.contains('Artifact') ?? false;
+    final isCreature = t?.isCreature ?? c?.isCreature ?? false;
+    final subtypes = t?.subtypes ?? c?.subtypes ?? const <String>[];
+    final String typeLine;
+    final String rules;
+    final String? pt;
+    if (t != null) {
+      final types = [if (t.isLegendary) 'Legendary', 'Token', if (t.isArtifact) 'Artifact', if (t.isCreature) 'Creature', if (t.isLand) 'Land'];
+      typeLine = '${types.join(' ')}${t.subtypes.isEmpty ? '' : ' — ${t.subtypes.join(' ')}'}';
+      rules = [if (t.keywords.isNotEmpty) t.keywords.map((k) => '$k').join(', '), if (t.text.isNotEmpty) t.text.replaceAll('~', name)].join('\n');
+      pt = t.isCreature ? '${t.power}/${t.toughness}' : null;
+    } else {
+      typeLine = c?.typeLine ?? 'Token';
+      rules = c?.oracleText ?? '';
+      pt = c != null && c.power != null ? '${c.power}/${c.toughness}' : null;
+    }
+    final key = isLand && colors.isEmpty ? 'land' : (colors.length > 1 ? 'multi' : (colors.isEmpty ? 'none' : colors.first));
+    final (frame, pale) = _frames[key] ?? _frames['none']!;
+    final w = width, h = width * cardAspect;
+    final ink = const Color(0xFF151515);
+    Widget bar(String text, double size) => Container(
+      height: h * 0.072,
+      padding: EdgeInsets.symmetric(horizontal: w * 0.035),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: pale,
+        borderRadius: BorderRadius.circular(w * 0.03),
+        border: Border.all(color: Color.lerp(frame, Colors.black, 0.35)!, width: w * 0.008 + 0.5),
+      ),
+      child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(text, maxLines: 1, style: TextStyle(fontSize: size, fontWeight: FontWeight.w700, color: ink, height: 1.1))),
+    );
     return Container(
-      width: width,
-      height: width * cardAspect,
-      decoration: BoxDecoration(color: LCARS.panel, borderRadius: BorderRadius.circular(width * 0.045), border: Border.all(color: color, width: 2)),
-      padding: const EdgeInsets.all(4),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Text(name.isEmpty ? 'TOKEN' : name.toUpperCase(), style: LCARS.font(width * 0.11, color: color), textAlign: TextAlign.center, maxLines: 3),
-        if (t != null && t.isCreature) Text('${t.power}/${t.toughness}', style: LCARS.font(width * 0.16)),
-        if (t != null && t.keywords.isNotEmpty) Text(t.keywords.map((k) => k.toString()).join(', '), style: LCARS.font(width * 0.08, weight: FontWeight.w400, color: LCARS.gray), textAlign: TextAlign.center),
-        Icon(Icons.auto_awesome, color: color.withValues(alpha: 0.6), size: width * 0.18),
-      ]),
+      width: w,
+      height: h,
+      padding: EdgeInsets.all(w * 0.035),
+      decoration: BoxDecoration(color: const Color(0xFF0B0B0B), borderRadius: BorderRadius.circular(w * 0.045)),
+      child: Container(
+        padding: EdgeInsets.all(w * 0.03),
+        decoration: BoxDecoration(color: frame, borderRadius: BorderRadius.circular(w * 0.025)),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                bar(name, w * 0.075),
+                SizedBox(height: h * 0.01),
+                Expanded(
+                  flex: 11,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black54, width: w * 0.006 + 0.5),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color.lerp(frame, Colors.black, 0.55)!, Color.lerp(frame, Colors.white, 0.15)!],
+                      ),
+                    ),
+                    child: Center(child: Icon(iconFor(name, subtypes, land: isLand, artifact: isArtifact && !isCreature), size: w * 0.36, color: Colors.white.withValues(alpha: 0.85))),
+                  ),
+                ),
+                SizedBox(height: h * 0.01),
+                bar(typeLine, w * 0.058),
+                SizedBox(height: h * 0.01),
+                Expanded(
+                  flex: 8,
+                  child: Container(
+                    padding: EdgeInsets.fromLTRB(w * 0.04, w * 0.03, w * 0.04, pt != null ? w * 0.09 : w * 0.03),
+                    decoration: BoxDecoration(color: pale, border: Border.all(color: Color.lerp(frame, Colors.black, 0.35)!, width: w * 0.006 + 0.5)),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.topLeft,
+                      child: SizedBox(
+                        width: w * 0.78,
+                        child: Text(rules, style: TextStyle(fontSize: w * 0.06, color: ink, height: 1.2)),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (pt != null)
+              Positioned(
+                right: -w * 0.005,
+                bottom: -h * 0.012,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: w * 0.04, vertical: w * 0.01),
+                  decoration: BoxDecoration(
+                    color: pale,
+                    borderRadius: BorderRadius.circular(w * 0.03),
+                    border: Border.all(color: Color.lerp(frame, Colors.black, 0.35)!, width: w * 0.01 + 0.5),
+                  ),
+                  child: Text(pt, style: TextStyle(fontSize: w * 0.08, fontWeight: FontWeight.w800, color: ink, height: 1.1)),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

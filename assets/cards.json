@@ -17315,6 +17315,117 @@
    "scryfallId": "7536292c-da25-41c8-ba28-1e35758a7f3d",
    "imageLarge": "",
    "frame": []
+  },
+  {
+   "id": "tok-treasure",
+   "name": "Treasure",
+   "file": "images/tok-treasure.jpg",
+   "set": "tok",
+   "collectorNumber": "15",
+   "rarity": "common",
+   "manaCost": "",
+   "manaValue": 0,
+   "colors": [],
+   "colorIdentity": [],
+   "typeLine": "Token Artifact — Treasure",
+   "supertypes": [
+    "Token"
+   ],
+   "types": [
+    "Artifact"
+   ],
+   "subtypes": [
+    "Treasure"
+   ],
+   "oracleText": "{T}, Sacrifice this token: Add one mana of any color.",
+   "flavorText": "",
+   "keywords": [],
+   "power": null,
+   "toughness": null,
+   "producedMana": [
+    "B",
+    "G",
+    "R",
+    "U",
+    "W"
+   ],
+   "layout": "token",
+   "artist": "Alayna Danner",
+   "variant": false,
+   "token": true,
+   "scryfallId": "03992f88-7a15-4234-9bed-b7617d7ff09c",
+   "imageLarge": "https://cards.scryfall.io/large/front/0/3/03992f88-7a15-4234-9bed-b7617d7ff09c.jpg?1789735245",
+   "frame": []
+  },
+  {
+   "id": "tok-clue",
+   "name": "Clue",
+   "file": "images/tok-clue.jpg",
+   "set": "tok",
+   "collectorNumber": "13",
+   "rarity": "common",
+   "manaCost": "",
+   "manaValue": 0,
+   "colors": [],
+   "colorIdentity": [],
+   "typeLine": "Token Artifact — Clue",
+   "supertypes": [
+    "Token"
+   ],
+   "types": [
+    "Artifact"
+   ],
+   "subtypes": [
+    "Clue"
+   ],
+   "oracleText": "{2}, Sacrifice this token: Draw a card.",
+   "flavorText": "",
+   "keywords": [],
+   "power": null,
+   "toughness": null,
+   "producedMana": [],
+   "layout": "token",
+   "artist": "Clint Lockwood",
+   "variant": false,
+   "token": true,
+   "scryfallId": "1481e938-7763-4109-b313-2a21053a82df",
+   "imageLarge": "https://cards.scryfall.io/large/front/1/4/1481e938-7763-4109-b313-2a21053a82df.jpg?1789754721",
+   "frame": []
+  },
+  {
+   "id": "tok-food",
+   "name": "Food",
+   "file": "images/tok-food.jpg",
+   "set": "tok",
+   "collectorNumber": "27",
+   "rarity": "common",
+   "manaCost": "",
+   "manaValue": 0,
+   "colors": [],
+   "colorIdentity": [],
+   "typeLine": "Token Artifact — Food",
+   "supertypes": [
+    "Token"
+   ],
+   "types": [
+    "Artifact"
+   ],
+   "subtypes": [
+    "Food"
+   ],
+   "oracleText": "{2}, {T}, Sacrifice this token: You gain 3 life.",
+   "flavorText": "",
+   "keywords": [],
+   "power": null,
+   "toughness": null,
+   "producedMana": [],
+   "layout": "token",
+   "artist": "Steve Prescott",
+   "variant": false,
+   "token": true,
+   "scryfallId": "da1fca2e-4ea7-4c5f-bd58-f9529dfb6f37",
+   "imageLarge": "https://cards.scryfall.io/large/front/d/a/da1fca2e-4ea7-4c5f-bd58-f9529dfb6f37.jpg?1783903567",
+   "frame": []
   }
  ]
 }

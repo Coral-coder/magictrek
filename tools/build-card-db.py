@@ -8,6 +8,7 @@ Cards Scryfall doesn't list yet come from tools/card-overrides.json with the myt
 scan in cards/ as their image.
 
     tools/build-card-db.py [--sets trk,trc,ttrk] [--size large|normal] [--cache DIR]
+    tools/build-card-db.py --tokens-only    # add the EXTRA_TOKENS scans to the existing database
 
 To add a set later, add its code to --sets (or SETS below) and re-run; everything is cached in
 DIR (default .scryfall-cache, git-ignored) so re-runs are quick and offline-friendly.
@@ -20,6 +21,14 @@ OUT = os.path.join(ROOT, "assets", "cards.json")
 IMAGES = os.path.join(ROOT, "assets", "images")
 OVERRIDES = os.path.join(ROOT, "tools", "card-overrides.json")
 SETS = ["trk", "trc", "ttrk"]
+
+# Tokens the cards make that the Star Trek token set doesn't print. Each comes from another set's
+# printing whose rules text matches exactly, so the scan shows what the token does.
+EXTRA_TOKENS = {
+    "Treasure": "{T}, Sacrifice this token: Add one mana of any color.",
+    "Clue": "{2}, Sacrifice this token: Draw a card.",
+    "Food": "{2}, {T}, Sacrifice this token: You gain 3 life.",
+}
 UA = "magictrek-card-db/2.0 (https://github.com/coral-coder/magictrek)"
 
 
@@ -124,12 +133,58 @@ def entry(card_id, c, image_file, variant, is_token):
     }
 
 
+def same_text(a, b):
+    """Token rules text, compared loosely: older printings say "this artifact" or "~"."""
+    t = lambda x: re.sub(r"(this (artifact|token)|~)", "~", (x or "").strip().lower())
+    return t(a) == t(b)
+
+
+def extra_tokens(have, size, cache_dir):
+    """Entries for EXTRA_TOKENS not already in the database, newest matching printing first."""
+    out = []
+    for name, text in EXTRA_TOKENS.items():
+        if any(e["token"] and e["name"] == name for e in have):
+            continue
+        url = ("https://api.scryfall.com/cards/search?order=released&dir=desc&unique=prints&include_extras=true&q="
+               + urllib.parse.quote(f'!"{name}" t:token game:paper -is:universesbeyond'))
+        found = None
+        for c in get_json(url, cache_dir, "token-" + norm(name))["data"]:
+            # A plain printing: no Secret Lair, promo or full-art versions.
+            plain = c.get("set_type") not in ("box", "promo", "memorabilia", "funny") and not c.get("full_art")
+            if plain and same_text(c.get("oracle_text"), text) and image_uris(c):
+                found = c
+                break
+        if found is None:
+            print(f"WARNING: no {name} token printing with that text", file=sys.stderr)
+            continue
+        uris = image_uris(found)
+        card_id = f"tok-{norm(name)}"
+        download(uris.get(size) or uris.get("large") or uris.get("normal"), os.path.join(IMAGES, f"{card_id}.jpg"))
+        e = entry(card_id, found, f"images/{card_id}.jpg", False, True)
+        e["set"] = "tok"
+        out.append(e)
+    return out
+
+
+def tokens_only(args):
+    db = json.load(open(OUT))
+    added = extra_tokens(db["cards"], args.size, args.cache)
+    db["cards"] += added
+    with open(OUT, "w") as fh:
+        json.dump(db, fh, indent=1, ensure_ascii=False)
+        fh.write("\n")
+    print(f"added {len(added)} tokens: {', '.join(e['name'] + ' (' + e['collectorNumber'] + ')' for e in added)}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sets", default=",".join(SETS), help="comma-separated Scryfall set codes")
     ap.add_argument("--size", default="large", choices=["large", "normal", "png"])
     ap.add_argument("--cache", default=os.path.join(ROOT, ".scryfall-cache"))
+    ap.add_argument("--tokens-only", action="store_true", help="only add EXTRA_TOKENS to the existing database")
     args = ap.parse_args()
+    if args.tokens_only:
+        return tokens_only(args)
     sets = [s.strip().lower() for s in args.sets.split(",") if s.strip()]
     os.makedirs(IMAGES, exist_ok=True)
 
@@ -188,6 +243,8 @@ def main():
         variant = key in seen_names
         seen_names.setdefault(key, card_id)
         out.append(entry(card_id, c, f"images/{dst}", variant, False))
+
+    out += extra_tokens(out, args.size, args.cache)
 
     # Drop images that no longer belong to any card.
     wanted = {e["file"].split("/")[-1] for e in out if e["file"]}
