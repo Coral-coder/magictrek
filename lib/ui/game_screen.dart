@@ -125,7 +125,7 @@ class _GameScreenState extends State<GameScreen> {
     const TourStep('Welcome aboard', 'A one-minute look around the table. You can see it again any time from the ? button at the top.'),
     TourStep('Your opponent', 'Their name, life, and how many cards they hold, have in their deck and in their graveyard. Below: the cards they have in play. Tap any of them to read it.', target: _tourOpponent),
     TourStep('The command bar', 'The light bulb line tells you what you can do right now. The buttons move the game on: Attack, End turn, and answers when a card asks you something.', target: _tourBar),
-    TourStep('Your battlefield', 'Your creatures and other cards in play, with your lands underneath: each label says how many are ready to tap for mana this turn. Settings can show lands as cards instead.', target: _tourMine),
+    TourStep('Your battlefield', 'Your creatures and other cards in play, with your lands underneath: each label says how many are ready to tap for mana this turn. The cards button at the top shows every land as a card instead.', target: _tourMine),
     TourStep('Your status', 'Your life (lose it all and you lose), cards in hand, deck and graveyard. Tap GRAVE to look through a graveyard.', target: _tourStrip),
     TourStep('Your hand', 'Cards with a blue glow can be played now. Tap any card to see it large and choose what to do with it. Slide sideways to see the rest.', target: _tourHand),
     TourStep('Help', 'Lost? Tap here for help on what to do now, the full rules, and to turn these hints off. Good luck, Captain.', target: _tourHelp),
@@ -1062,20 +1062,36 @@ class _GameScreenState extends State<GameScreen> {
         title: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text((state.turn == 0 ? 'Opening hand' : 'Turn ${state.turn} · ${state.phase.label}').toUpperCase(), style: LCARS.font(14, color: LCARS.peach))),
         actions: [
           IconButton(
+            key: const ValueKey('show-all-cards'),
+            tooltip: AppStore.shared.showAllCards ? 'Show lands as labels' : 'Show every card',
+            icon: Icon(AppStore.shared.showAllCards ? Icons.view_agenda_outlined : Icons.view_module, color: LCARS.gold),
+            onPressed: () async {
+              await AppStore.shared.setShowAllCards(!AppStore.shared.showAllCards);
+              if (mounted) setState(() {});
+            },
+          ),
+          IconButton(
             key: _tourHelp,
             tooltip: 'Help',
             icon: const Icon(Icons.help_outline, color: LCARS.skyBlue),
             onPressed: showHelp,
           ),
-          IconButton(
-            tooltip: "Captain's log",
-            icon: const Icon(Icons.list_alt, color: LCARS.lavender),
-            onPressed: showLog,
-          ),
-          IconButton(
-            tooltip: 'Concede',
-            icon: const Icon(Icons.flag, color: LCARS.red),
-            onPressed: confirmConcede,
+          PopupMenuButton<String>(
+            key: const ValueKey('table-menu'),
+            tooltip: 'More',
+            icon: const Icon(Icons.more_vert, color: LCARS.lavender),
+            color: LCARS.panel,
+            onSelected: (v) => v == 'log' ? showLog() : confirmConcede(),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'log',
+                child: Row(children: [const Icon(Icons.list_alt, color: LCARS.lavender), const SizedBox(width: 10), Text("Captain's log", style: LCARS.body)]),
+              ),
+              PopupMenuItem(
+                value: 'concede',
+                child: Row(children: [const Icon(Icons.flag, color: LCARS.red), const SizedBox(width: 10), Text('Concede', style: LCARS.body)]),
+              ),
+            ],
           ),
         ],
       ),
@@ -1087,7 +1103,7 @@ class _GameScreenState extends State<GameScreen> {
                 // Each side's cards in play need room to be seen and tapped. On a short screen
                 // (a phone on its side, a low browser window) the table scrolls instead of
                 // squeezing them away.
-                final fieldMin = AppStore.shared.landsAsCards ? 190.0 : 150.0;
+                const fieldMin = 140.0;
                 final fixed = handHeight + 2 * 46 + 110;
                 if (box.maxHeight - fixed >= 2 * fieldMin) {
                   return Column(
@@ -1224,7 +1240,7 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
     // With "Show lands as cards", each land is a card in a row of its own, under the others.
-    final asCards = AppStore.shared.landsAsCards;
+    final asCards = AppStore.shared.showAllCards;
     Widget landCards() => LayoutBuilder(
       builder: (_, box) {
         if (lands.isEmpty) {
@@ -1421,7 +1437,7 @@ class _GameScreenState extends State<GameScreen> {
           ? 'You may cast an instant now (glowing cards in your hand), or Pass to continue.'
           : '${state.players[state.stack.last.controller].name} is casting ${game.name(state.stack.last.id)}. Respond with a glowing instant, or let it resolve.';
     }
-    if (state.playerToAct != me) return "${state.players[them].name}'s move. Their actions appear on the table and in the log (top right).";
+    if (state.playerToAct != me) return "${state.players[them].name}'s move. Their actions appear on the table and in the Captain's log (⋮ at the top right).";
     final hand = state.players[me].hand;
     final canLand = hand.any((id) => game.canPlayLand(id, me));
     final castable = [...hand, ...game.extraPlayables(me)].where((id) => game.canCast(id, me)).length;

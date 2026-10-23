@@ -160,11 +160,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(
-            title: Text('Show lands as cards', style: LCARS.body),
-            subtitle: Text('Every land on the table as its own card. Off: lands are labels grouped by name, such as "3× Plains · 2 ready", leaving more room for the other cards.', style: LCARS.label),
-            value: store.landsAsCards,
+            title: Text('Show every card in play', style: LCARS.body),
+            subtitle: Text('Every card on the table as a card, lands included. Off: lands are labels grouped by name, such as "3× Plains · 2 ready", leaving more room for the other cards. The cards button at the top of the table switches it during a game.', style: LCARS.label),
+            value: store.showAllCards,
             activeThumbColor: LCARS.orange,
-            onChanged: store.setLandsAsCards,
+            onChanged: store.setShowAllCards,
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(

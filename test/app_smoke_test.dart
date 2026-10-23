@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart' hide Card;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:magictrek/app/store.dart';
+import 'package:magictrek/engine/abilities.dart';
+import 'package:magictrek/engine/cards.dart';
 import 'package:magictrek/engine/game.dart';
 import 'package:magictrek/engine/state.dart';
 import 'package:magictrek/main.dart';
+import 'package:magictrek/ui/card_widgets.dart';
 import 'package:magictrek/ui/decks.dart';
 import 'package:magictrek/ui/gallery.dart';
 import 'package:magictrek/ui/game_screen.dart';
@@ -129,7 +132,7 @@ void main() {
     final store = AppStore.shared;
     await store.setTourSeen(true);
     for (final asCards in [false, true]) {
-      await store.setLandsAsCards(asCards);
+      await store.setShowAllCards(asCards);
       final decks = store.legalDecks;
       final session = store.startLocalGame(deck: decks[0], opponentDeck: decks[1], hotseat: false);
       // Put cards in play on both sides: a creature and a land each.
@@ -158,6 +161,42 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
     }
-    await store.setLandsAsCards(false);
+    await store.setShowAllCards(false);
+  });
+
+  testWidgets('tokens are drawn as cards, and the table button switches lands between cards and labels', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final store = AppStore.shared;
+    await store.setTourSeen(true);
+    expect(store.showAllCards, isFalse, reason: 'lands are labels by default');
+    final decks = store.legalDecks;
+    final session = store.startLocalGame(deck: decks[0], opponentDeck: decks[1], hotseat: false);
+    final g = session.game;
+    final officer = g.createToken(TokenSpec(name: 'Officer', power: 1, toughness: 1, colors: [ManaColor.red], subtypes: ['Officer']), 1);
+    final treasure = g.createToken(TokenSpec.treasure, 1);
+    final land = g.newObject(cardID: store.db.byName('Plains')!.id, owner: 0, zone: Zone.hand);
+    g.move(land, Zone.battlefield, controller: 0);
+    await tester.pumpWidget(app(const GameScreen()));
+    await tester.pump();
+    // The Officer has no printed scan: it is drawn as a card with its name, type and power/toughness.
+    final officerCard = find.byKey(ValueKey('perm-$officer'));
+    expect(find.descendant(of: officerCard, matching: find.byType(TokenFace)), findsOneWidget);
+    expect(find.descendant(of: officerCard, matching: find.text('Token Creature — Officer')), findsOneWidget);
+    // The Treasure uses its printed scan.
+    expect(find.descendant(of: find.byKey(ValueKey('perm-$treasure')), matching: find.byType(TokenFace)), findsNothing);
+    expect(find.byKey(const ValueKey('land-Plains')), findsOneWidget, reason: 'a label by default');
+    expect(find.byKey(ValueKey('perm-$land')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('show-all-cards')));
+    await tester.pump();
+    expect(store.showAllCards, isTrue);
+    expect(find.byKey(ValueKey('perm-$land')), findsOneWidget, reason: 'now a card');
+    await tester.tap(find.byKey(const ValueKey('show-all-cards')));
+    await tester.pump();
+    expect(store.showAllCards, isFalse);
+    expect(find.byKey(const ValueKey('land-Plains')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
   });
 }

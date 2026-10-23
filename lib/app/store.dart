@@ -33,8 +33,9 @@ class AppStore extends ChangeNotifier implements MatchArchive {
   /// A line on the table saying what you can do right now, for new players.
   bool coachOn = true;
 
-  /// Lands on the table as cards, one per land, instead of labels grouped by name.
-  bool landsAsCards = false;
+  /// Every card in play shown as a card, lands included (one card per land). Off: lands are
+  /// labels grouped by name, to leave more room.
+  bool showAllCards = false;
   /// Whether the guided tour of the table has been shown (or skipped).
   bool tourSeen = false;
   Rules rules = Rules.standard;
@@ -54,7 +55,7 @@ class AppStore extends ChangeNotifier implements MatchArchive {
     autoUpdate = _prefs.getBool('autoUpdate') ?? true;
     tapToInspect = _prefs.getBool('tapToInspect') ?? true;
     coachOn = _prefs.getBool('coachOn') ?? true;
-    landsAsCards = _prefs.getBool('landsAsCards') ?? false;
+    showAllCards = _prefs.getBool('showAllCards') ?? false;
     tourSeen = _prefs.getBool('tourSeen') ?? false;
     final rulesJson = _prefs.getString('rules');
     if (rulesJson != null) {
@@ -138,9 +139,9 @@ class AppStore extends ChangeNotifier implements MatchArchive {
     notifyListeners();
   }
 
-  Future<void> setLandsAsCards(bool v) async {
-    landsAsCards = v;
-    await _prefs.setBool('landsAsCards', v);
+  Future<void> setShowAllCards(bool v) async {
+    showAllCards = v;
+    await _prefs.setBool('showAllCards', v);
     notifyListeners();
   }
 
