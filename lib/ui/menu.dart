@@ -160,6 +160,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(
+            title: Text('Show lands as cards', style: LCARS.body),
+            subtitle: Text('Every land on the table as its own card. Off: lands are labels grouped by name, such as "3× Plains · 2 ready", leaving more room for the other cards.', style: LCARS.label),
+            value: store.landsAsCards,
+            activeThumbColor: LCARS.orange,
+            onChanged: store.setLandsAsCards,
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
             title: Text('Coach hints', style: LCARS.body),
             subtitle: Text('A line on the table saying what you can do right now.', style: LCARS.label),
             value: store.coachOn,

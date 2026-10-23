@@ -600,6 +600,125 @@ void main() {
       expect(game.state.objects[pick]!.zone, Zone.hand);
       expect(game.state.players[0].life, life + 2, reason: 'first spell of the game');
     });
+    group('lands', () {
+      ObjectID inHand(Game game, PlayerID p, String name) {
+        final id = game.newObject(cardID: db.byName(name)!.id, owner: p, zone: Zone.hand);
+        game.state.players[p].hand.add(id);
+        return id;
+      }
+
+      test('one land per turn, only in your own main phase with nothing on the stack', () {
+        final game = makeGame([]);
+        final a = inHand(game, 0, 'Plains'), b = inHand(game, 0, 'Plains');
+        expect(game.canPlayLand(a, 0), isTrue);
+        expect(game.canPlayLand(a, 1), isFalse, reason: "not the opponent's card or turn");
+        game.apply(PlayLandAction(a));
+        expect(game.state.objects[a]!.zone, Zone.battlefield);
+        expect(game.state.objects[a]!.tapped, isFalse);
+        expect(game.canPlayLand(b, 0), isFalse, reason: 'one land per turn');
+        expect(() => game.apply(PlayLandAction(b)), throwsA(isA<GameError>()));
+
+        // Not in combat.
+        final fresh = makeGame([]);
+        final c = inHand(fresh, 0, 'Island');
+        fresh.apply(const PassPhaseAction());
+        expect(fresh.state.phase.isMain, isFalse);
+        expect(fresh.canPlayLand(c, 0), isFalse, reason: 'only in a main phase');
+
+        // Not while a spell is on the stack.
+        final g2 = makeGame([db.byName('Gin\'tak Charge')!.id]);
+        giveLands(g2, 0, 'Mountain', 1);
+        final d = inHand(g2, 0, 'Mountain');
+        g2.apply(CastAction(g2.state.players[0].hand.first, targets: [EffectContext.playerObject(1)]));
+        if (g2.state.stack.isNotEmpty) expect(g2.canPlayLand(d, 0), isFalse, reason: 'the stack must be empty');
+        passWindows(g2);
+        expect(g2.canPlayLand(d, 0), isTrue, reason: 'and again once it resolves');
+      });
+
+      test("not on the opponent's turn, and the count starts over each turn", () {
+        final game = makeGame([]);
+        game.apply(PlayLandAction(inHand(game, 0, 'Plains')));
+        final next = inHand(game, 0, 'Plains');
+        game.apply(const EndTurnAction());
+        final pending = game.state.pending;
+        if (pending != null && pending.decision is DiscardToHandSizeDecision) {
+          game.apply(RespondAction(CardsResponse(game.state.players[pending.player].hand.take(1).toList())));
+        }
+        expect(game.state.activePlayer, 1);
+        expect(game.canPlayLand(next, 0), isFalse);
+        final theirs = inHand(game, 1, 'Swamp');
+        while (!game.state.phase.isMain) {
+          game.apply(const PassPhaseAction());
+        }
+        expect(game.canPlayLand(theirs, 1), isTrue, reason: 'a new turn, a new land');
+      });
+
+      test('Captain Janeway allows a second land each turn', () {
+        final game = makeGame([]);
+        putOnTable(game, 0, 'Captain Kathryn Janeway');
+        final lands = [for (var i = 0; i < 3; i++) inHand(game, 0, 'Forest')];
+        game.apply(PlayLandAction(lands[0]));
+        game.apply(PlayLandAction(lands[1]));
+        expect(game.canPlayLand(lands[2], 0), isFalse);
+      });
+
+      test('Captain Pike plays a land from the top of the library', () {
+        final game = makeGame([]);
+        putOnTable(game, 0, 'Captain Pike, Fullness of Time');
+        final top = game.newObject(cardID: db.byName('Vulcan')!.id, owner: 0, zone: Zone.library);
+        game.state.players[0].library.insert(0, top);
+        expect(game.canPlayLand(top, 0), isTrue);
+        game.apply(PlayLandAction(top));
+        expect(game.state.objects[top]!.zone, Zone.battlefield);
+        expect(game.state.objects[top]!.tapped, isTrue, reason: 'Vulcan enters tapped');
+      });
+
+      test('a shock land: the player chooses to pay 2 life or have it enter tapped', () {
+        for (final pay in [true, false]) {
+          final game = makeGame([]);
+          final vents = inHand(game, 0, 'Steam Vents');
+          final life = game.state.players[0].life;
+          game.apply(PlayLandAction(vents, payLife: pay));
+          expect(game.state.objects[vents]!.tapped, !pay);
+          expect(game.state.players[0].life, pay ? life - 2 : life);
+        }
+        // With less than 2 life it can't be paid.
+        final game = makeGame([]);
+        game.state.players[0].life = 1;
+        final fountain = inHand(game, 0, 'Hallowed Fountain');
+        game.apply(PlayLandAction(fountain, payLife: true));
+        expect(game.state.objects[fountain]!.tapped, isTrue);
+        expect(game.state.players[0].life, 1);
+      });
+
+      test('Federation Outpost enters tapped unless you control two other lands', () {
+        for (final others in [1, 2]) {
+          final game = makeGame([]);
+          giveLands(game, 0, 'Plains', others);
+          final outpost = inHand(game, 0, 'Federation Outpost');
+          game.apply(PlayLandAction(outpost));
+          expect(game.state.objects[outpost]!.tapped, others < 2, reason: '$others other lands');
+        }
+      });
+
+      test('landfall triggers for a land put onto the battlefield, not only one played', () {
+        final game = makeGame([]);
+        final surveyors = putOnTable(game, 0, 'Xindi Surveyors');
+        final explorer = putOnTable(game, 0, 'Saurian Explorer');
+        giveLands(game, 0, 'Forest', 6);
+        // {6}: create a tapped New Planet land token.
+        final index = game.abilitiesIn(game.state.objects[explorer]!).indexWhere((a) => a is Activated);
+        game.apply(ActivateAbilityAction(explorer, index));
+        passWindows(game);
+        final planet = game.state.permanentsOf(0).where((o) => o.isToken && game.characteristics(o.id).isLand).toList();
+        expect(planet, hasLength(1));
+        expect(game.state.objects[surveyors]!.counters[CounterKind.plusOne], 1, reason: 'Xindi Surveyors saw the land token enter');
+        // And a played land triggers it again.
+        game.apply(PlayLandAction(inHand(game, 0, 'Forest')));
+        passWindows(game);
+        expect(game.state.objects[surveyors]!.counters[CounterKind.plusOne], 2);
+      });
+    });
   });
 
   // Lockstep needs every platform, the browser included, to draw the same numbers. These are the

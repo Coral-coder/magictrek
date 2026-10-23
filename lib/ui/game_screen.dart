@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart' hide Card;
 
 import '../app/session.dart';
@@ -121,9 +123,9 @@ class _GameScreenState extends State<GameScreen> {
 
   List<TourStep> get tourSteps => [
     const TourStep('Welcome aboard', 'A one-minute look around the table. You can see it again any time from the ? button at the top.'),
-    TourStep('Your opponent', 'Their name, life, and how many cards they hold, have in their deck and in their graveyard. Below: the cards they have in play, with their lands as labels.', target: _tourOpponent),
+    TourStep('Your opponent', 'Their name, life, and how many cards they hold, have in their deck and in their graveyard. Below: the cards they have in play. Tap any of them to read it.', target: _tourOpponent),
     TourStep('The command bar', 'The light bulb line tells you what you can do right now. The buttons move the game on: Attack, End turn, and answers when a card asks you something.', target: _tourBar),
-    TourStep('Your battlefield', 'Your creatures and other cards in play. Your lands are the labels underneath: each says how many are ready to tap for mana this turn.', target: _tourMine),
+    TourStep('Your battlefield', 'Your creatures and other cards in play, with your lands underneath: each label says how many are ready to tap for mana this turn. Settings can show lands as cards instead.', target: _tourMine),
     TourStep('Your status', 'Your life (lose it all and you lose), cards in hand, deck and graveyard. Tap GRAVE to look through a graveyard.', target: _tourStrip),
     TourStep('Your hand', 'Cards with a blue glow can be played now. Tap any card to see it large and choose what to do with it. Slide sideways to see the rest.', target: _tourHand),
     TourStep('Help', 'Lost? Tap here for help on what to do now, the full rules, and to turn these hints off. Good luck, Captain.', target: _tourHelp),
@@ -208,7 +210,7 @@ class _GameScreenState extends State<GameScreen> {
       return;
     }
     if (game.canPlayLand(id, me)) {
-      perform(PlayLandAction(id));
+      playLand(id);
       return;
     }
     final card = game.card(id);
@@ -250,7 +252,7 @@ class _GameScreenState extends State<GameScreen> {
     if (card == null || !canAct) return const [];
     final parsed = game.db.parsed(card);
     final items = <Widget>[];
-    if (game.canPlayLand(id, me)) items.add(_sheetButton('Play this land', () => perform(PlayLandAction(id)), color: LCARS.green));
+    if (game.canPlayLand(id, me)) items.add(_sheetButton('Play this land', () => playLand(id), color: LCARS.green));
     if (game.canCast(id, me)) {
       final modal = parsed.spellEffects.whereType<Modal>().firstOrNull;
       if (modal != null) {
@@ -675,7 +677,8 @@ class _GameScreenState extends State<GameScreen> {
     final card = game.card(id) ?? (obj.token == null ? null : game.db.tokenCard(obj.token!.name, power: obj.token!.power, toughness: obj.token!.toughness));
     final c = game.characteristics(id);
     final screen = MediaQuery.sizeOf(context);
-    final width = (screen.width - 48).clamp(200.0, 340.0);
+    // As large as fits, leaving room below it for its details and buttons on a short screen.
+    final width = min(screen.width - 48, screen.height * 0.6 / cardAspect).clamp(150.0, 340.0);
     final facts = <String>[];
     if (obj.zone == Zone.battlefield) {
       if (c.isCreature) facts.add('${c.power}/${c.toughness}${obj.damage > 0 ? ', ${obj.damage} damage' : ''}');
@@ -947,6 +950,34 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+  /// Plays a land. A land that says "you may pay 2 life; if you don't, it enters tapped" asks first.
+  Future<void> playLand(ObjectID id) async {
+    final o = state.objects[id];
+    final shock = o != null && game.parsedOf(o)?.statics.contains(SimpleStatic.shockLand) == true;
+    if (!shock) {
+      perform(PlayLandAction(id));
+      return;
+    }
+    final life = state.players[me].life;
+    final name = game.name(id);
+    final pay = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Pay 2 life for $name?'),
+        content: Text(life >= 2
+            ? 'Pay 2 life (you have $life) and it enters untapped, ready to tap for mana this turn. Or keep your life and it enters tapped.'
+            : 'You have $life life, not enough to pay 2, so it enters tapped.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Enter tapped')),
+          if (life >= 2) TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Pay 2 life')),
+        ],
+      ),
+    );
+    if (pay == null || !mounted) return;
+    perform(PlayLandAction(id, payLife: pay));
+  }
+
   Future<void> confirmConcede() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -1051,23 +1082,52 @@ class _GameScreenState extends State<GameScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            Column(
-              children: [
-                Expanded(
-                  flex: 5,
-                  child: Column(
-                    key: _tourOpponent,
+            LayoutBuilder(
+              builder: (context, box) {
+                // Each side's cards in play need room to be seen and tapped. On a short screen
+                // (a phone on its side, a low browser window) the table scrolls instead of
+                // squeezing them away.
+                final fieldMin = AppStore.shared.landsAsCards ? 190.0 : 150.0;
+                final fixed = handHeight + 2 * 46 + 110;
+                if (box.maxHeight - fixed >= 2 * fieldMin) {
+                  return Column(
                     children: [
-                      playerStrip(them, top: true),
-                      Expanded(child: battlefield(them, top: true)),
+                      Expanded(
+                        flex: 5,
+                        child: Column(
+                          key: _tourOpponent,
+                          children: [
+                            playerStrip(them, top: true),
+                            Expanded(child: battlefield(them, top: true)),
+                          ],
+                        ),
+                      ),
+                      controlBar(),
+                      Expanded(flex: 5, child: KeyedSubtree(key: _tourMine, child: battlefield(me, top: false))),
+                      KeyedSubtree(key: _tourStrip, child: playerStrip(me, top: false)),
+                      KeyedSubtree(key: _tourHand, child: hand()),
+                    ],
+                  );
+                }
+                final field = max(fieldMin, (box.maxHeight - 110) / 2);
+                return SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      Column(
+                        key: _tourOpponent,
+                        children: [
+                          playerStrip(them, top: true),
+                          SizedBox(height: field, child: battlefield(them, top: true)),
+                        ],
+                      ),
+                      controlBar(),
+                      KeyedSubtree(key: _tourMine, child: SizedBox(height: field, child: battlefield(me, top: false))),
+                      KeyedSubtree(key: _tourStrip, child: playerStrip(me, top: false)),
+                      KeyedSubtree(key: _tourHand, child: hand()),
                     ],
                   ),
-                ),
-                controlBar(),
-                Expanded(flex: 5, child: KeyedSubtree(key: _tourMine, child: battlefield(me, top: false))),
-                KeyedSubtree(key: _tourStrip, child: playerStrip(me, top: false)),
-                KeyedSubtree(key: _tourHand, child: hand()),
-              ],
+                );
+              },
             ),
             if (state.isOver) Positioned.fill(child: gameOverOverlay()),
           ],
@@ -1163,7 +1223,29 @@ class _GameScreenState extends State<GameScreen> {
         ],
       ),
     );
+    // With "Show lands as cards", each land is a card in a row of its own, under the others.
+    final asCards = AppStore.shared.landsAsCards;
+    Widget landCards() => LayoutBuilder(
+      builder: (_, box) {
+        if (lands.isEmpty) {
+          return Center(child: Text('no lands yet', style: LCARS.small.copyWith(color: LCARS.gray)));
+        }
+        final h = (box.maxHeight - 10).clamp(40.0, 200.0);
+        return ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+          children: [
+            for (final o in lands)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Center(child: permanent(o, h / cardAspect)),
+              ),
+          ],
+        );
+      },
+    );
     Widget mainRow() => Expanded(
+      flex: asCards ? 3 : 1,
       child: LayoutBuilder(
         builder: (_, box) {
           if (others.isEmpty) {
@@ -1181,32 +1263,33 @@ class _GameScreenState extends State<GameScreen> {
               for (final o in others)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: Center(
-                    child: PermanentView(
-                      key: ValueKey('perm-${o.id}'),
-                      session: session!,
-                      objectID: o.id,
-                      width: w,
-                      highlighted: isCandidate(o.id),
-                      selected: isSelected(o.id),
-                      dimmed: isDimmed(o.id),
-                      onTap: () => tapPermanent(o.id),
-                      onLongPress: () => inspect(o.id),
-                      tag: blockTag(o.id),
-                    ),
-                  ),
+                  child: Center(child: permanent(o, w)),
                 ),
             ],
           );
         },
       ),
     );
+    final landPart = asCards ? Expanded(flex: 2, child: landCards()) : landRow();
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: LCARS.panel.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(10)),
-      child: Column(children: top ? [landRow(), mainRow()] : [mainRow(), landRow()]),
+      child: Column(children: top ? [landPart, mainRow()] : [mainRow(), landPart]),
     );
   }
+
+  Widget permanent(GameObject o, double width) => PermanentView(
+    key: ValueKey('perm-${o.id}'),
+    session: session!,
+    objectID: o.id,
+    width: width,
+    highlighted: isCandidate(o.id),
+    selected: isSelected(o.id),
+    dimmed: isDimmed(o.id),
+    onTap: () => tapPermanent(o.id),
+    onLongPress: () => inspect(o.id),
+    tag: blockTag(o.id),
+  );
 
   /// A group of same-named lands as one label. Tapping it acts on one of them: the one a
   /// spell can target, else an untapped one.
@@ -1985,12 +2068,14 @@ class _GameScreenState extends State<GameScreen> {
     ];
   }
 
+  /// About a fifth of the screen, so cards in hand can be recognized at a glance.
+  double get handHeight => (MediaQuery.sizeOf(context).height * 0.21).clamp(130.0, 230.0);
+
   Widget hand() {
     final hidden = session!.mode == SessionMode.hotseat && state.playerToAct != me;
     final ids = state.players[me].hand;
     final picked = interaction is PickingCards ? (interaction as PickingCards).chosen : const <ObjectID>[];
-    // About a fifth of the screen, so cards in hand can be recognized at a glance.
-    final height = (MediaQuery.sizeOf(context).height * 0.21).clamp(130.0, 230.0);
+    final height = handHeight;
     final cardW = (height - 22) / cardAspect;
     final otherW = (height - 36) / cardAspect;
     return SizedBox(

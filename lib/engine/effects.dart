@@ -579,9 +579,6 @@ extension GameEffects on Game {
         if (land == null) return false;
         move(land, Zone.battlefield, controller: controller, tapped: x.tapped);
         enteredBattlefield(land, untapped: !x.tapped);
-        for (final o in state.permanentsOf(controller)) {
-          if (o.id != land) fireTriggers(SimpleTrigger.landfall, o.id, touched: land);
-        }
         return true;
       case Modal x:
         final src = source == null ? null : state.objects[source];
@@ -1240,11 +1237,6 @@ extension GameEffects on Game {
           state.objects[id]!.attachedTo = host;
         }
         enteredBattlefield(id, untapped: !tapped);
-        if (c?.isLand == true) {
-          for (final o in state.permanentsOf(controller)) {
-            if (o.id != id) fireTriggers(SimpleTrigger.landfall, o.id, touched: id);
-          }
-        }
       case LibraryDestination.libraryTop:
         move(id, Zone.library);
       case LibraryDestination.libraryBottom:

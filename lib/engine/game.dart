@@ -63,7 +63,7 @@ class Game {
   void _applyTurnAction(GameAction action) {
     switch (action) {
       case PlayLandAction a:
-        _playLand(a.id);
+        _playLand(a.id, payLife: a.payLife);
       case StationAction a:
         _station(a.spacecraft, a.creature);
       case EquipAction a:
@@ -549,7 +549,7 @@ class Game {
 
   // MARK: - Playing cards
 
-  void _playLand(ObjectID id) {
+  void _playLand(ObjectID id, {bool? payLife}) {
     final p = state.activePlayer;
     if (!canPlayLand(id, p)) throw GameError("Can't play that land now");
     state.players[p].landsPlayedThisTurn++;
@@ -562,7 +562,9 @@ class Game {
         } else if (s is EntersTappedUnless) {
           tapped = state.permanentsOf(p).where((o) => characteristics(o.id).isLand).length < s.landsAtLeast;
         } else if (s == SimpleStatic.shockLand) {
-          if (state.players[p].life > 4) {
+          // You can pay life only while you have that much.
+          final life = state.players[p].life;
+          if ((payLife ?? life > 4) && life >= 2) {
             changeLife(p, -2);
           } else {
             tapped = true;
@@ -580,9 +582,6 @@ class Game {
       }
     }
     enteredBattlefield(id, untapped: !tapped);
-    for (final o in state.permanentsOf(p)) {
-      if (o.id != id) fireTriggers(SimpleTrigger.landfall, o.id, touched: id);
-    }
     _runContinuations();
   }
 
@@ -951,6 +950,13 @@ class Game {
         if (event is PermanentEntersTrigger && matches(event.filter, id, other.controller, other.id, base: c)) {
           fireTrigger(t, key, source: other.id, touched: id);
         }
+      }
+    }
+    // Landfall: any land entering under a player's control, played or put there by an effect
+    // (fetched, explored onto the table, a land token).
+    if (c.isLand) {
+      for (final other in state.permanentsOf(o.controller)) {
+        fireTriggers(SimpleTrigger.landfall, other.id, touched: id);
       }
     }
   }
