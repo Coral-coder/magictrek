@@ -1,0 +1,72 @@
+# Copies this repository's Android signing key (the ANDROID_KEYSTORE_* secrets) into other
+# repositories, so their releases are signed with the same key. Run it by hand: Actions → Share
+# Android key → Run workflow, with the repo names.
+#
+# GitHub never lets anyone read a secret back, so the only way to copy one is from inside a
+# workflow that already has it: each value is sealed to the target repository's public key and
+# written there as a repository secret through the GitHub API. Nothing is printed or stored.
+#
+# Needs a SECRETS_TOKEN secret here (also accepted: GH_PAT, REPO_TOKEN, ADMIN_TOKEN, PAT): a
+# token that may write Actions secrets on every target repository.
+name: Share Android key
+
+on:
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: "Repositories to copy the key to (names, same owner; space or comma separated)"
+        required: true
+        default: "Bond-touch-beyond-android Dev_deploy_setup"
+
+permissions:
+  contents: read
+
+jobs:
+  share:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Copy the key
+        env:
+          TOKEN: ${{ secrets.SECRETS_TOKEN || secrets.GH_PAT || secrets.REPO_TOKEN || secrets.ADMIN_TOKEN || secrets.PAT }}
+          TARGETS: ${{ inputs.repos }}
+          OWNER: ${{ github.repository_owner }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::error::Add a SECRETS_TOKEN secret here first (see the top of this workflow)"; exit 1; fi
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then echo "::error::This repository has no ANDROID_KEYSTORE_BASE64 secret to share"; exit 1; fi
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pynacl
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import base64, json, os, re, sys, urllib.request
+          from nacl import encoding, public
+
+          names = ["ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD"]
+          present = {n: os.environ[n] for n in names if os.environ.get(n)}
+
+          def call(method, path, body=None):
+              req = urllib.request.Request("https://api.github.com" + path, method=method,
+                                           data=json.dumps(body).encode() if body is not None else None)
+              req.add_header("Authorization", "Bearer " + os.environ["TOKEN"])
+              req.add_header("Accept", "application/vnd.github+json")
+              with urllib.request.urlopen(req) as r:
+                  data = r.read()
+                  return json.loads(data) if data else None
+
+          failed = False
+          for repo in [r for r in re.split(r"[\s,]+", os.environ["TARGETS"]) if r]:
+              path = f"/repos/{os.environ['OWNER']}/{repo}/actions/secrets"
+              try:
+                  key = call("GET", f"{path}/public-key")
+                  box = public.SealedBox(public.PublicKey(key["key"].encode(), encoding.Base64Encoder()))
+                  for name, value in present.items():
+                      sealed = base64.b64encode(box.encrypt(value.encode())).decode()
+                      call("PUT", f"{path}/{name}", {"encrypted_value": sealed, "key_id": key["key_id"]})
+                  print(f"{repo}: stored {' '.join(present)}")
+              except urllib.error.HTTPError as e:
+                  failed = True
+                  print(f"::error::{repo}: HTTP {e.code} (does the token cover this repository, with Secrets: read and write?)")
+          sys.exit(1 if failed else 0)
+          PY
