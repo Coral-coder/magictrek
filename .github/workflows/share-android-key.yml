@@ -6,7 +6,7 @@
 # workflow that already has it: each value is sealed to the target repository's public key and
 # written there as a repository secret through the GitHub API. Nothing is printed or stored.
 #
-# Needs a SECRETS_TOKEN secret here (also accepted: GH_PAT, REPO_TOKEN, ADMIN_TOKEN, PAT): a
+# Needs a SECRETS_TOKEN secret here (also accepted: SECRETS, SECRET_TOKEN, GH_PAT, REPO_TOKEN, ADMIN_TOKEN, PAT): a
 # token that may write Actions secrets on every target repository.
 name: Share Android key
 
@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Copy the key
         env:
-          TOKEN: ${{ secrets.SECRETS_TOKEN || secrets.GH_PAT || secrets.REPO_TOKEN || secrets.ADMIN_TOKEN || secrets.PAT }}
+          TOKEN: ${{ secrets.SECRETS_TOKEN || secrets.SECRETS || secrets.SECRET_TOKEN || secrets.GH_PAT || secrets.REPO_TOKEN || secrets.ADMIN_TOKEN || secrets.PAT }}
           TARGETS: ${{ inputs.repos }}
           OWNER: ${{ github.repository_owner }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
